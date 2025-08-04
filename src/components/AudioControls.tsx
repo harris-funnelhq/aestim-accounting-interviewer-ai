@@ -7,9 +7,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ConnectionStatus } from './ConnectionStatus';
+import { CalibrationScreen } from './CalibrationScreen';
 import { motion } from 'framer-motion';
 import { cn } from "@/lib/utils";
 import { Button } from './ui/button';
+import { Settings } from 'lucide-react';
 
 interface AudioControlsProps {
   isMicOn: boolean;
@@ -109,6 +111,15 @@ export const AudioControls = ({
             </SelectContent>
           </Select>
           <ConnectionStatus status={connectionStatus} />
+          {/* MOCKTAGON INTEGRATION: Audio Calibration Settings */}
+          <CalibrationScreen 
+            trigger={
+              <Button variant="outline" size="sm" className="h-10">
+                <Settings className="w-4 h-4" />
+              </Button>
+            }
+            onComplete={() => console.log('Calibration completed!')}
+          />
         </div>
       </div>
 

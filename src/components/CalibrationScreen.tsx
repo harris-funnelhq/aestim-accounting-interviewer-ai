@@ -267,6 +267,3 @@ export const CalibrationScreen = ({ onComplete, trigger }: CalibrationScreenProp
 
 // Default export with settings button trigger
 export default CalibrationScreen;
-
-// Named export for custom trigger usage
-export { CalibrationScreen };
