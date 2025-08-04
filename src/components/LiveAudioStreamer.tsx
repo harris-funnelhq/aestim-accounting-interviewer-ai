@@ -1,5 +1,4 @@
-"use client";
-
+// Define StreamMetrics interface directly since useAudioMetrics doesn't exist
 export interface StreamMetrics {
   noiseFloor: number;
   silenceThreshold: number;
@@ -11,27 +10,24 @@ export interface StreamMetrics {
 }
 
 export default class LiveAudioStreamer {
-  private ws: WebSocket | null = null;
-  private audioContext: AudioContext | null = null;
-  private mediaStream: MediaStream | null = null;
-  private workletNode: AudioWorkletNode | null = null;
-  private isStreaming = false;
-  private isMuted = false;
-
-  // --- ADDING MISSING PROPERTIES ---
-  private silenceTimer: number | null = null;
-  private readonly SILENCE_IDLE_MS = 2500;
-  private lastTranscript = "";
-  // --- END OF ADDITIONS ---
-
   private sessionId: string;
   private config: any;
   private onTranscriptUpdate: (txt: string, ready: boolean) => void;
   private onMetricsUpdate: (m: StreamMetrics) => void;
   private onConnectionOpen: () => void;
   private onConnectionError: (error: string) => void;
-  private audioDeviceId?: string;
   private wsUrl: string;
+  private audioDeviceId?: string;
+
+  private isStreaming = false;
+  private isMuted = false;
+  private audioContext?: AudioContext;
+  private mediaStream?: MediaStream;
+  private workletNode?: AudioWorkletNode;
+  private ws?: WebSocket;
+  private silenceTimer: number | null = null;
+  private lastTranscript = "";
+  private readonly SILENCE_IDLE_MS = 2000;
 
   constructor(
     sessionId: string,
@@ -51,14 +47,11 @@ export default class LiveAudioStreamer {
     this.onConnectionError = onConnectionError;
     this.wsUrl = wsUrl;
     this.audioDeviceId = audioDeviceId;
+    console.log('[LiveAudioStreamer] Initialized with config:', this.config);
   }
 
-  // --- ADDING MISSING METHODS FOR SILENCE DETECTION ---
-  private clearSilenceTimer() {
-    if (this.silenceTimer !== null) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
-    }
+  private cleanTranscription(text: string): string {
+    return text.replace(/[^a-zA-Z0-9\s.,'-?]/g, '').trim();
   }
 
   private startSilenceTimer() {
@@ -69,33 +62,68 @@ export default class LiveAudioStreamer {
     }, this.SILENCE_IDLE_MS);
   }
 
+  private clearSilenceTimer() {
+    if (this.silenceTimer !== null) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+  }
+
   private finishUtterance() {
-    const txt = this.lastTranscript.trim();
-    console.log(`[LiveAudioStreamer] Silence timer fired. Finishing utterance with text: "${txt}"`);
-    if (txt) {
-      this.onTranscriptUpdate(txt, true);
+    const cleanedTxt = this.cleanTranscription(this.lastTranscript);
+    if (cleanedTxt) {
+      this.onTranscriptUpdate(cleanedTxt, true);
     }
     this.lastTranscript = "";
   }
-  // --- END OF ADDITIONS ---
 
-  async startStreaming() {
+  public async startStreaming() {
     if (this.isStreaming) {
-      console.log("[LiveAudioStreamer] Already streaming.");
+      console.warn("[LiveAudioStreamer] startStreaming called while already streaming.");
       return;
     }
     this.isStreaming = true;
-    console.log("[LiveAudioStreamer] Attempting to start streaming...");
+    console.log("[LiveAudioStreamer] Starting stream...");
 
+    // --- DEFINITIVE STARTUP SEQUENCE ---
+    // 1. Prepare the entire audio pipeline BEFORE connecting. This prevents race conditions.
     try {
-      // Ensure the URL has a trailing slash before appending the session ID.
-      const baseUrl = this.wsUrl.endsWith('/') ? this.wsUrl : `${this.wsUrl}/`;
-      const fullWsUrl = `${baseUrl}${this.sessionId}`;
-      
-      console.log(`[LiveAudioStreamer] Connecting to WebSocket at ${fullWsUrl}`);
-      this.ws = new WebSocket(fullWsUrl);
+      console.log("[LiveAudioStreamer] 🎤 Requesting microphone access...");
+      const audioConstraint = this.audioDeviceId ? { deviceId: { exact: this.audioDeviceId } } : true;
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
+
+      console.log(`[LiveAudioStreamer] 🎵 Creating AudioContext with sample rate: ${this.config.sample_rate}`);
+      this.audioContext = new AudioContext({ sampleRate: this.config.sample_rate });
+
+      if (this.audioContext.state === 'suspended') {
+        console.warn('[LiveAudioStreamer] AudioContext is suspended. Resuming...');
+        await this.audioContext.resume();
+        console.log('[LiveAudioStreamer] AudioContext resumed.');
+      }
+
+      console.log("[LiveAudioStreamer] 🔧 Loading audio worklet...");
+      await this.audioContext.audioWorklet.addModule("/recorder-worklet.js");
+      console.log("[LiveAudioStreamer] ✅ Audio worklet loaded.");
+
+      this.workletNode = new AudioWorkletNode(this.audioContext, "recorder-processor");
+      const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+      source.connect(this.workletNode).connect(this.audioContext.destination);
+    } catch (err) {
+      console.error("[LiveAudioStreamer] ❌ FATAL: Audio setup failed:", err);
+      this.onConnectionError("Failed to set up microphone or audio processor.");
+      this.cleanup();
+      return;
+    }
+
+    // 2. Now that audio is ready, connect to the WebSocket.
+    try {
+      const url = new URL(this.wsUrl);
+      // url.searchParams.append('session_id', this.sessionId);
+      // const fullWsUrl = url.toString();
+      // console.log(`[LiveAudioStreamer] 🔌 Connecting to WebSocket: ${fullWsUrl}`);
+      this.ws = new WebSocket(url+'/'+this.sessionId.toString());
     } catch (error) {
-      console.error("[LiveAudioStreamer] Failed to create WebSocket.", error);
+      console.error("[LiveAudioStreamer] ❌ FATAL: Failed to create WebSocket.", error);
       this.onConnectionError("Failed to initialize connection.");
       this.cleanup();
       return;
@@ -103,79 +131,66 @@ export default class LiveAudioStreamer {
 
     this.ws.binaryType = "arraybuffer";
 
-    this.ws.onopen = async () => {
-      console.log("[LiveAudioStreamer] WebSocket connection opened successfully.");
+    // 3. Define WebSocket event handlers.
+    this.ws.onopen = () => {
+      console.log("[LiveAudioStreamer] ✅ WebSocket connection opened.");
       this.onConnectionOpen();
 
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: "config", payload: this.config }));
+        const configMessage = { type: "config", payload: this.config };
+        const messageString = JSON.stringify(configMessage);
+        console.log(`[LiveAudioStreamer] ✉️ Sending configuration message: ${messageString}`);
+        this.ws.send(messageString);
+      } else {
+        console.error("[LiveAudioStreamer] ❌ FATAL: WebSocket is not open after onopen event.");
       }
+    };
 
-      try {
-        const audioConstraint = this.audioDeviceId ? { deviceId: { exact: this.audioDeviceId } } : true;
-        this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
-      } catch (err) {
-        console.error("[LiveAudioStreamer] ERROR: Could not get microphone access.", err);
-        this.onConnectionError("Microphone access denied.");
-        this.cleanup();
-        return;
-      }
-
-      this.audioContext = new AudioContext({ sampleRate: this.config.sample_rate });
-      try {
-        await this.audioContext.audioWorklet.addModule("/recorder-worklet.js");
-      } catch (err) {
-        console.error("[LiveAudioStreamer] ERROR: Failed to load audio worklet.", err);
-        this.onConnectionError("Audio processor failed.");
-        this.cleanup();
-        return;
-      }
-
-      if (this.audioContext && this.mediaStream) {
-        this.workletNode = new AudioWorkletNode(this.audioContext, "recorder-processor");
-        this.workletNode.port.onmessage = (ev: MessageEvent) => {
-          const msg = ev.data;
-          if (msg.type === "metrics") {
-            this.onMetricsUpdate(msg);
-          } else if (msg instanceof Float32Array && this.ws?.readyState === WebSocket.OPEN && !this.isMuted) {
-            const pcm = msg;
-            const int16 = Int16Array.from(pcm, v => {
-              const s = Math.max(-1, Math.min(1, v));
-              return s < 0 ? s * 0x8000 : s * 0x7fff;
-            });
-            this.ws.send(int16.buffer);
-          }
-        };
-        const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-        source.connect(this.workletNode).connect(this.audioContext.destination);
+    this.workletNode.port.onmessage = (ev: MessageEvent) => {
+      if (ev.data.type === "metrics") {
+        this.onMetricsUpdate(ev.data);
+      } else if (ev.data instanceof Float32Array && this.ws?.readyState === WebSocket.OPEN && !this.isMuted) {
+        const pcm = ev.data;
+        const int16 = Int16Array.from(pcm, v => Math.max(-1, Math.min(1, v)) * 32767);
+        this.ws.send(int16.buffer);
       }
     };
 
     this.ws.onmessage = (ev) => {
-      console.log("[LiveAudioStreamer] WebSocket message received:", ev.data);
-      let t: string;
       try {
-        // This line was missing, causing the "data is not defined" error.
-        const data = JSON.parse(ev.data as string);
-        t = data.transcript ?? JSON.stringify(data);
-      } catch {
-        t = (ev.data as string).trim();
+        // Handle both JSON and plain text responses
+        let transcript: string;
+        if (typeof ev.data === 'string') {
+          try {
+            const parsed = JSON.parse(ev.data);
+            transcript = parsed.transcript || ev.data;
+          } catch {
+            transcript = ev.data;
+          }
+        } else {
+          transcript = String(ev.data);
+        }
+        
+        this.lastTranscript = transcript.trim();
+        if (this.lastTranscript) {
+          this.onTranscriptUpdate(this.lastTranscript, false);
+          this.startSilenceTimer();
+        }
+      } catch (error) {
+        console.error('[LiveAudioStreamer] Error processing WebSocket message:', error);
       }
-      this.lastTranscript = t;
-      this.onTranscriptUpdate(t, false);
-      this.startSilenceTimer();
     };
 
     this.ws.onclose = (event) => {
-      console.log(`[LiveAudioStreamer] WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
-      if (!event.wasClean) {
-        this.onConnectionError("Connection closed unexpectedly.");
+      console.log(`[LiveAudioStreamer] WebSocket closed. Code: ${event.code}, Reason: "${event.reason}"`);
+      if (!event.wasClean && event.code !== 1000) {
+        this.onConnectionError(`Connection lost: ${event.reason || 'Unknown error'}`);
       }
       this.cleanup();
     };
 
     this.ws.onerror = (err) => {
-      console.error("[LiveAudioStreamer] WebSocket error.", err);
+      console.error("[LiveAudioStreamer] WebSocket error:", err);
       this.onConnectionError("WebSocket connection failed.");
       this.cleanup();
     };
@@ -185,30 +200,22 @@ export default class LiveAudioStreamer {
     this.isMuted = muted;
   }
 
-  stopStreaming() {
+  public async stopStreaming() {
     this.cleanup();
   }
 
+  public recalibrate() {
+    this.workletNode?.port.postMessage({ command: 'recalibrate' });
+  }
+
   private cleanup() {
-    this.clearSilenceTimer(); // Add this call back
-    this.workletNode?.port.close();
-    this.workletNode?.disconnect();
-    if (this.audioContext && this.audioContext.state !== "closed") {
-      this.audioContext.close().catch(console.error);
-    }
-    this.mediaStream?.getTracks().forEach((t) => t.stop());
-    
-    if (this.ws) {
-      this.ws.onopen = null;
-      this.ws.onmessage = null;
-      this.ws.onclose = null;
-      this.ws.onerror = null;
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-        this.ws.close();
-      }
-    }
-    this.ws = null;
+    console.log("[LiveAudioStreamer] Cleaning up resources...");
     this.isStreaming = false;
-    this.lastTranscript = ""; // Add this property reset back
+    this.clearSilenceTimer();
+    this.ws?.close();
+    this.workletNode?.port.postMessage({ command: 'stop' });
+    this.workletNode?.disconnect();
+    this.mediaStream?.getTracks().forEach(track => track.stop());
+    this.audioContext?.close();
   }
 }
