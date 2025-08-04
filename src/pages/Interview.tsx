@@ -9,6 +9,7 @@ import CartesiaSpeaker, { CartesiaSpeakerHandle } from '@/components/CartesiaSpe
 import { AiInterviewer } from '@/components/AiInterviewer';
 import { InteractiveQuestionPanel } from '@/components/InteractiveQuestionPanel';
 import { useNavigate } from 'react-router-dom';
+import { useConversationOrchestrator, ConversationState } from '@/hooks/useConversationOrchestrator';
 
 // --- Configuration ---
 // The .env variable already contains the full path, so we just use it directly.
@@ -27,7 +28,34 @@ const DUMMY_WELCOME_MESSAGE: HistoryItem = {
 
 const Interview = () => {
   const navigate = useNavigate();
-  // --- State and Refs ---
+  
+  // MOCKTAGON INTEGRATION: Replace old state management with conversation orchestrator
+  const conversationOrchestrator = useConversationOrchestrator(
+    {
+      sessionId: crypto.randomUUID(),
+      backendUrl: BACKEND_URL,
+      mode: 'prod',
+      enableAutoTransition: true
+    },
+    {
+      onStateChange: (newState) => {
+        console.log(`[Interview] Conversation state changed to: ${newState}`);
+        // Update derived states based on conversation state
+        setIsListening(newState === ConversationState.LISTENING);
+        setIsSpeaking(newState === ConversationState.SPEAKING);
+        setIsWaitingForResponse(newState === ConversationState.THINKING);
+      },
+      onInteractiveTask: (task) => {
+        setInteractiveTask(task);
+        setIsInteractiveQuestion(true);
+      },
+      onError: (error) => {
+        console.error('[Interview] Conversation error:', error);
+      }
+    }
+  );
+
+  // Audio and UI state (preserved from original)
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMicOn, setIsMicOn] = useState(true);
@@ -35,25 +63,31 @@ const Interview = () => {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedAudioDevice, setSelectedAudioDevice] = useState('');
-  const [history, setHistory] = useState<HistoryItem[]>([DUMMY_WELCOME_MESSAGE]);
   const [currentUtterance, setCurrentUtterance] = useState("");
   const [messageQueue, setMessageQueue] = useState("");
-  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
   const [textToSpeak, setTextToSpeak] = useState(DUMMY_WELCOME_MESSAGE.parts[0].text);
   
-  // These two state variables control the view switching.
+  // Interactive question state (preserved)
   const [isInteractiveQuestion, setIsInteractiveQuestion] = useState(false);
   const [interactiveTask, setInteractiveTask] = useState<any | null>(null);
+  
+  // Extract state from conversation orchestrator
+  const { 
+    state: conversationState, 
+    messages, 
+    isWaitingForResponse, 
+    sendMessage: orchestratorSendMessage,
+    completeSpeaking,
+    cleanup: cleanupOrchestrator
+  } = conversationOrchestrator;
 
   const streamerRef = useRef<LiveAudioStreamer | null>(null);
   const speakerRef = useRef<CartesiaSpeakerHandle>(null);
   const activityTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const isSpeakingRef = useRef(isSpeaking);
   const currentUtteranceRef = useRef(currentUtterance);
   const messageQueueRef = useRef(messageQueue);
   const isWaitingRef = useRef(isWaitingForResponse);
-  const historyRef = useRef(history);
   const avatarRef = useRef(null);
   const isFirstRun = useRef(true); // To prevent initial animation
 
@@ -106,7 +140,6 @@ const Interview = () => {
   useEffect(() => { currentUtteranceRef.current = currentUtterance; }, [currentUtterance]);
   useEffect(() => { messageQueueRef.current = messageQueue; }, [messageQueue]);
   useEffect(() => { isWaitingRef.current = isWaitingForResponse; }, [isWaitingForResponse]);
-  useEffect(() => { historyRef.current = history; }, [history]);
 
   useEffect(() => {
     const getAudioDevices = async () => {
@@ -119,117 +152,39 @@ const Interview = () => {
       } catch (err) { console.error("Error accessing media devices:", err); }
     };
     getAudioDevices();
-  }, []);
+    
+    // MOCKTAGON INTEGRATION: Initialize with welcome message
+    conversationOrchestrator.addMessage('ai', DUMMY_WELCOME_MESSAGE.parts[0].text);
+    setTextToSpeak(DUMMY_WELCOME_MESSAGE.parts[0].text);
+  }, [conversationOrchestrator]);
 
+  // MOCKTAGON INTEGRATION: Replace sendChatMessage with conversation orchestrator
   const sendChatMessage = async (payload: { message: string }) => {
-    console.log(`[sendChatMessage] Preparing to send message: "${payload.message}"`);
-    if (abortControllerRef.current) {
-      console.log("[sendChatMessage] Aborting previous request.");
-      abortControllerRef.current.abort();
+    console.log(`[sendChatMessage] Using conversation orchestrator to send: "${payload.message}"`);
+    
+    const result = await orchestratorSendMessage(payload.message);
+    
+    if (result.error) {
+      console.error('[sendChatMessage] Error:', result.error);
+      return;
     }
-    abortControllerRef.current = new AbortController();
-    const historyForAPI = [...historyRef.current];
-    const newUserMessage: HistoryItem = { role: 'user', parts: [{ text: payload.message }] };
     
-    console.log("[sendChatMessage] Updating history with user message.");
-    setHistory(prev => [...prev, newUserMessage]);
-    setIsWaitingForResponse(true);
+    if (result.terminated) {
+      handleEndInterview();
+      return;
+    }
     
-    const requestBody = { history: historyForAPI, newUserMessage: payload.message };
-    console.log("[sendChatMessage] Sending request to backend with body:", requestBody);
-
-    try {
-      const response = await fetch(BACKEND_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-        signal: abortControllerRef.current.signal,
-      });
-
-      console.log(`[sendChatMessage] Received response with status: ${response.status}`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-
-      const rawAiMessage = data.aiMessage;
-
-      // --- FIX: Added the missing check for the termination signal ---
-      // This check must happen *before* any other parsing logic.
-      if (typeof rawAiMessage === 'string' && rawAiMessage.includes('[END_INTERVIEW]')) {
-        console.log("[sendChatMessage] Termination signal received. Ending interview.");
-        handleEndInterview();
-        return; // Stop all further processing immediately.
-      }
-      // --- END OF FIX ---
-
-      // --- RESTRUCTURED PARSING LOGIC ---
-      let textForHistory: string;
-      let textForSpeech: string;
-      let responseType: string = 'normal';
-      let problemData: any = null;
-
-      let jsonString: string | null = null;
-      const jsonBlockRegex = /```json\n([\s\S]*?)\n```/;
-      const blockMatch = rawAiMessage.match(jsonBlockRegex);
-
-      if (blockMatch && blockMatch[1]) {
-        jsonString = blockMatch[1];
-      } else {
-        const firstBrace = rawAiMessage.indexOf('{');
-        const lastBrace = rawAiMessage.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace > firstBrace) {
-          jsonString = rawAiMessage.substring(firstBrace, lastBrace + 1);
-        }
-      }
-
-      if (jsonString) {
-        try {
-          const parsedResponse = JSON.parse(jsonString);
-          textForHistory = parsedResponse.response || "An interactive task is ready.";
-          responseType = parsedResponse.type || 'normal';
-          problemData = parsedResponse.problem || null;
-        } catch (e) {
-          console.warn("[Parser] Failed to parse JSON. Treating as plain text.", e);
-          textForHistory = rawAiMessage;
-        }
-      } else {
-        textForHistory = rawAiMessage;
-      }
-
-      if (responseType === 'normal' && textForHistory.length > 400) {
-        console.log("[Parser] Long normal question detected. Converting to interactive display.");
-        responseType = 'interactive';
-        problemData = {
-          taskType: 'long_text',
-          description: textForHistory
-        };
-        textForSpeech = "I have a detailed scenario for you. Please read the information presented on the screen.";
-      } else {
-        textForSpeech = textForHistory;
-      }
-
-      // Start the speaking animation immediately for better responsiveness.
-      // The CartesiaSpeaker component will set this back to false when it finishes speaking.
-      setIsSpeaking(true);
-
-      const aiMessage: HistoryItem = { role: 'model', parts: [{ text: textForHistory }] };
-      
-      setHistory(prev => [...prev, aiMessage]);
-      setTextToSpeak(textForSpeech); 
-
-      if (responseType === 'interactive' && problemData) {
-        setInteractiveTask(problemData);
-        setIsInteractiveQuestion(true);
-      } else {
-        setInteractiveTask(null);
-        setIsInteractiveQuestion(false);
-      }
-
-    } catch (error: any) {
-      if (error.name !== 'AbortError') console.error("[sendChatMessage] Error:", error);
-    } finally {
-      setIsWaitingForResponse(false);
+    // Handle the response
+    if (result.textToSpeak) {
+      setTextToSpeak(result.textToSpeak);
+    }
+    
+    if (result.isInteractive && result.task) {
+      setInteractiveTask(result.task);
+      setIsInteractiveQuestion(true);
+    } else {
+      setInteractiveTask(null);
+      setIsInteractiveQuestion(false);
     }
   };
 
@@ -342,15 +297,16 @@ const Interview = () => {
     handleStart();
     return () => {
       streamerRef.current?.stopStreaming();
-      if (abortControllerRef.current) abortControllerRef.current.abort();
+      cleanupOrchestrator(); // MOCKTAGON: Use conversation orchestrator cleanup
     };
-  }, [selectedAudioDevice]);
+  }, [selectedAudioDevice, cleanupOrchestrator]);
 
   const handleEndInterview = () => {
     streamerRef.current?.stopStreaming();
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    // FIX: Pass the final chat history to the results page via navigation state.
-    navigate('/reports', { state: { history: historyRef.current } });
+    cleanupOrchestrator(); // MOCKTAGON: Use conversation orchestrator cleanup
+    // MOCKTAGON: Convert messages to history format for results page
+    const historyForResults = conversationOrchestrator.convertToHistoryFormat(messages);
+    navigate('/reports', { state: { history: historyForResults } });
   };
 
   // --- NEW, ROBUST MAIN UI ---
@@ -384,7 +340,7 @@ const Interview = () => {
               <div className="w-2/3 max-w-3xl relative left-20 bottom-8">
                 <InteractiveQuestionPanel 
                   task={interactiveTask}
-                  onSubmitAnswer={handleInteractiveSubmit}
+                  onSubmit={handleInteractiveSubmit}
                 />
               </div>
             </motion.div>
@@ -397,7 +353,7 @@ const Interview = () => {
               exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.4, ease: 'easeInOut' } }}
             >
               <ConversationPanel
-                history={history}
+                history={conversationOrchestrator.convertToHistoryFormat(messages)}
                 isWaitingForResponse={isWaitingForResponse}
               />
             </motion.div>
@@ -419,7 +375,13 @@ const Interview = () => {
       <CartesiaSpeaker
         ref={speakerRef}
         text={textToSpeak}
+        trigger={conversationState === ConversationState.SPEAKING}
+        mode="full"
         onSpeakingStateChange={setIsSpeaking}
+        onComplete={() => {
+          console.log('[Interview] Speaking completed, transitioning to listening');
+          completeSpeaking(); // MOCKTAGON: Auto-transition after speaking
+        }}
       />
     </div>
   );
