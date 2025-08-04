@@ -11,7 +11,8 @@ import { CalibrationScreen } from './CalibrationScreen';
 import { motion } from 'framer-motion';
 import { cn } from "@/lib/utils";
 import { Button } from './ui/button';
-import { Settings } from 'lucide-react';
+import { Settings, Brain, Ear, MessageSquare, CheckCircle } from 'lucide-react';
+import { ConversationState } from '@/hooks/useConversationOrchestrator';
 
 interface AudioControlsProps {
   isMicOn: boolean;
@@ -21,7 +22,8 @@ interface AudioControlsProps {
   onAudioChange: (deviceId: string) => void;
   audioLevel: number;
   connectionStatus: 'idle' | 'connecting' | 'connected' | 'error';
-  onEndInterview: () => void; // FIX: Changed prop from onNextClick to onEndInterview
+  conversationState?: ConversationState; // MOCKTAGON: Conversation state indicator
+  onEndInterview: () => void;
 }
 
 // Mic button remains the same - it's clean and effective.
@@ -39,6 +41,77 @@ const MicStatusIndicator = ({ isMicOn, onClick }: { isMicOn: boolean, onClick: (
         {isMicOn ? <Mic size={20} className="text-sky-400" /> : <MicOff size={20} className="text-gray-400" />}
       </div>
     </button>
+  );
+};
+
+// MOCKTAGON INTEGRATION: Conversation state indicator
+const ConversationStateIndicator = ({ state }: { state?: ConversationState }) => {
+  if (!state) return null;
+
+  const stateConfig = {
+    [ConversationState.IDLE]: {
+      icon: CheckCircle,
+      label: "Ready",
+      color: "text-slate-500",
+      bgColor: "bg-slate-50 dark:bg-slate-800",
+      borderColor: "border-slate-200 dark:border-slate-700"
+    },
+    [ConversationState.CALIBRATING]: {
+      icon: Settings,
+      label: "Calibrating",
+      color: "text-blue-600",
+      bgColor: "bg-blue-50 dark:bg-blue-900/20",
+      borderColor: "border-blue-200 dark:border-blue-800"
+    },
+    [ConversationState.LISTENING]: {
+      icon: Ear,
+      label: "Listening",
+      color: "text-green-600",
+      bgColor: "bg-green-50 dark:bg-green-900/20",
+      borderColor: "border-green-200 dark:border-green-800"
+    },
+    [ConversationState.THINKING]: {
+      icon: Brain,
+      label: "Thinking",
+      color: "text-orange-600",
+      bgColor: "bg-orange-50 dark:bg-orange-900/20",
+      borderColor: "border-orange-200 dark:border-orange-800"
+    },
+    [ConversationState.SPEAKING]: {
+      icon: MessageSquare,
+      label: "Speaking",
+      color: "text-purple-600",
+      bgColor: "bg-purple-50 dark:bg-purple-900/20",
+      borderColor: "border-purple-200 dark:border-purple-800"
+    }
+  };
+
+  const config = stateConfig[state];
+  const IconComponent = config.icon;
+
+  return (
+    <motion.div
+      key={state}
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.2 }}
+      className={cn(
+        "flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-medium transition-all",
+        config.color,
+        config.bgColor,
+        config.borderColor
+      )}
+    >
+      <IconComponent 
+        className={cn(
+          "w-3 h-3",
+          state === ConversationState.LISTENING && "animate-pulse",
+          state === ConversationState.THINKING && "animate-spin",
+          state === ConversationState.SPEAKING && "animate-bounce"
+        )} 
+      />
+      <span>{config.label}</span>
+    </motion.div>
   );
 };
 
@@ -81,7 +154,8 @@ export const AudioControls = ({
   onAudioChange,
   audioLevel,
   connectionStatus,
-  onEndInterview, // FIX: Destructure the new prop
+  conversationState, // MOCKTAGON: New conversation state prop
+  onEndInterview,
 }: AudioControlsProps) => {
   const waveformLevel = isMicOn && connectionStatus === 'connected' ? audioLevel : 0;
 
@@ -111,6 +185,8 @@ export const AudioControls = ({
             </SelectContent>
           </Select>
           <ConnectionStatus status={connectionStatus} />
+          {/* MOCKTAGON INTEGRATION: Conversation State Indicator */}
+          <ConversationStateIndicator state={conversationState} />
           {/* MOCKTAGON INTEGRATION: Audio Calibration Settings */}
           <CalibrationScreen 
             trigger={

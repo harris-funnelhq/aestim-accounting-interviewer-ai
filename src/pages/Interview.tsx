@@ -369,8 +369,8 @@ const Interview = () => {
         onAudioChange={setSelectedAudioDevice}
         audioLevel={audioLevel}
         connectionStatus={connectionStatus}
-        onEndInterview={handleEndInterview} // This prop must be passed
-        // The props for buttons have been removed here as well
+        conversationState={conversationState} // MOCKTAGON: Pass conversation state
+        onEndInterview={handleEndInterview}
       />
       <CartesiaSpeaker
         ref={speakerRef}
