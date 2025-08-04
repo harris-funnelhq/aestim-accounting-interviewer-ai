@@ -14,8 +14,8 @@ This document outlines the step-by-step process to integrate Mocktagon's advance
 
 ### PHASE 1: Core Audio Upgrade (Week 1-2)
 - [x] 1.1: Upgrade LiveAudioStreamer component ✅ COMPLETED
-- [ ] 1.2: Enhance CartesiaSpeaker component  
-- [ ] 1.3: Create CalibrationScreen component
+- [x] 1.2: Enhance CartesiaSpeaker component ✅ COMPLETED
+- [ ] 1.3: Create CalibrationScreen component 🔄 IN PROGRESS
 
 ### PHASE 2: Conversation State Machine (Week 3-4)
 - [ ] 2.1: Create enhanced useConversationOrchestrator hook
