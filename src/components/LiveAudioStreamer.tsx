@@ -20,9 +20,20 @@ export default class LiveAudioStreamer {
 
   // --- ADDING MISSING PROPERTIES ---
   private silenceTimer: number | null = null;
-  private readonly SILENCE_IDLE_MS = 2500;
+  private readonly SILENCE_IDLE_MS = 4000; // Improved: Extended from 2500ms to 4000ms for better speech detection
   private lastTranscript = "";
   // --- END OF ADDITIONS ---
+
+  // --- MOCKTAGON INTEGRATION: Transcript cleaning function ---
+  private cleanTranscription(text: string): string {
+    const t = text.trim();
+    // Remove common transcription artifacts
+    if (t.toLowerCase().endsWith("thank you. thank you.")) {
+      return t.replace(/thank you\. thank you\.$/i, "").trim();
+    }
+    // Remove repeated phrases and artifacts
+    return t.replace(/\b(\w+)\s+\1\b/gi, '$1').trim();
+  }
 
   private sessionId: string;
   private config: any;
@@ -70,10 +81,15 @@ export default class LiveAudioStreamer {
   }
 
   private finishUtterance() {
-    const txt = this.lastTranscript.trim();
-    console.log(`[LiveAudioStreamer] Silence timer fired. Finishing utterance with text: "${txt}"`);
-    if (txt) {
-      this.onTranscriptUpdate(txt, true);
+    // MOCKTAGON INTEGRATION: Enhanced transcript processing with cleaning
+    const cleanedTxt = this.cleanTranscription(this.lastTranscript);
+    console.log(`[LiveAudioStreamer] Silence timer fired. Original: "${this.lastTranscript}", Cleaned: "${cleanedTxt}"`);
+    
+    if (cleanedTxt && cleanedTxt.length > 0) {
+      console.log(`[LiveAudioStreamer] Finishing utterance with cleaned text: "${cleanedTxt}"`);
+      this.onTranscriptUpdate(cleanedTxt, true);
+    } else {
+      console.log(`[LiveAudioStreamer] Skipping empty or invalid transcript`);
     }
     this.lastTranscript = "";
   }
