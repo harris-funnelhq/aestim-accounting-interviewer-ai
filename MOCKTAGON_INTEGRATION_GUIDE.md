@@ -17,10 +17,10 @@ This document outlines the step-by-step process to integrate Mocktagon's advance
 - [x] 1.2: Enhance CartesiaSpeaker component ✅ COMPLETED  
 - [x] 1.3: Create CalibrationScreen component ✅ COMPLETED
 
-### PHASE 2: Conversation State Machine (Week 3-4)
-- [ ] 2.1: Create enhanced useConversationOrchestrator hook
-- [ ] 2.2: Upgrade Interview.tsx with state machine
-- [ ] 2.3: Update AudioControls component
+### PHASE 2: Conversation State Machine (Week 3-4) ✅ COMPLETED
+- [x] 2.1: Create enhanced useConversationOrchestrator hook ✅ COMPLETED
+- [x] 2.2: Upgrade Interview.tsx with state machine ✅ COMPLETED  
+- [x] 2.3: Update AudioControls component ✅ COMPLETED
 
 ### PHASE 3: Backend Integration (Week 5-6)
 - [ ] 3.1: Create backend adapter layer

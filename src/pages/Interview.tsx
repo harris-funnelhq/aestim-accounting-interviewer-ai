@@ -64,7 +64,6 @@ const Interview = () => {
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedAudioDevice, setSelectedAudioDevice] = useState('');
   const [currentUtterance, setCurrentUtterance] = useState("");
-  const [messageQueue, setMessageQueue] = useState("");
   const [textToSpeak, setTextToSpeak] = useState(DUMMY_WELCOME_MESSAGE.parts[0].text);
   
   // Interactive question state (preserved)
@@ -86,7 +85,6 @@ const Interview = () => {
   const activityTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isSpeakingRef = useRef(isSpeaking);
   const currentUtteranceRef = useRef(currentUtterance);
-  const messageQueueRef = useRef(messageQueue);
   const isWaitingRef = useRef(isWaitingForResponse);
   const avatarRef = useRef(null);
   const isFirstRun = useRef(true); // To prevent initial animation
@@ -138,7 +136,6 @@ const Interview = () => {
   // --- Logic ---
   useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
   useEffect(() => { currentUtteranceRef.current = currentUtterance; }, [currentUtterance]);
-  useEffect(() => { messageQueueRef.current = messageQueue; }, [messageQueue]);
   useEffect(() => { isWaitingRef.current = isWaitingForResponse; }, [isWaitingForResponse]);
 
   useEffect(() => {
@@ -153,9 +150,11 @@ const Interview = () => {
     };
     getAudioDevices();
     
-    // MOCKTAGON INTEGRATION: Initialize with welcome message
+    // MOCKTAGON INTEGRATION: Initialize with welcome message and start speaking
     conversationOrchestrator.addMessage('ai', DUMMY_WELCOME_MESSAGE.parts[0].text);
     setTextToSpeak(DUMMY_WELCOME_MESSAGE.parts[0].text);
+    // Start in speaking state to deliver welcome message
+    conversationOrchestrator.transitionToState(ConversationState.SPEAKING);
   }, [conversationOrchestrator]);
 
   // MOCKTAGON INTEGRATION: Replace sendChatMessage with conversation orchestrator
@@ -194,16 +193,8 @@ const Interview = () => {
     }
   };
 
-  const attemptToSendFromQueue = () => {
-    // FIX: When the user stops speaking, the listening state is set to false.
-    setIsListening(false);
-    const queueContent = messageQueueRef.current;
-    console.log(`[attemptToSendFromQueue] Checking queue. Is waiting: ${isWaitingRef.current}, Queue content: "${queueContent}"`);
-    if (!isWaitingRef.current && queueContent) {
-      sendChatMessage({ message: queueContent });
-      setMessageQueue("");
-    }
-  };
+  // MOCKTAGON INTEGRATION: Direct integration with conversation orchestrator
+  // No more queue handling needed - transcripts go directly to orchestrator
 
   // --- NEW, DEFINITIVE STITCHING LOGIC ---
   // This version correctly handles punctuation and case differences.
@@ -249,25 +240,31 @@ const Interview = () => {
 
   const handleTranscriptUpdate = (transcript: string, isFinal: boolean) => {
     console.log(`[handleTranscriptUpdate] Received transcript: "${transcript}", Is Final: ${isFinal}`);
-    // FIX: As soon as a transcript arrives, it means the user is speaking.
-    setIsListening(true);
+    
+    // MOCKTAGON INTEGRATION: Ensure we're in listening state when receiving transcripts
+    if (conversationState !== ConversationState.LISTENING && conversationState !== ConversationState.THINKING) {
+      conversationOrchestrator.startListening();
+    }
+    
+    // Stop AI speaking if user starts talking
     if (isSpeakingRef.current) {
       console.log("[handleTranscriptUpdate] AI is speaking, stopping playback.");
       speakerRef.current?.stop();
     }
+    
     if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
-    // Use the new, more robust stitching function
+    
+    // Use the robust stitching function for building the utterance
     const newUtterance = intelligentStitch(currentUtteranceRef.current, transcript);
     setCurrentUtterance(newUtterance);
+    
     if (isFinal && newUtterance.trim()) {
-      console.log(`[handleTranscriptUpdate] Final utterance detected. Adding to message queue: "${newUtterance}"`);
-      setMessageQueue(prev => (prev ? `${prev}\n\n${newUtterance}` : newUtterance));
+      console.log(`[handleTranscriptUpdate] Final utterance: "${newUtterance}"`);
+      // Clear the current utterance and send to conversation orchestrator
       setCurrentUtterance("");
-      // Use a timeout to allow the state to update before sending
-      activityTimerRef.current = setTimeout(() => attemptToSendFromQueue(), 200);
-    } else if (!isFinal) {
-      activityTimerRef.current = setTimeout(() => attemptToSendFromQueue(), 500);
+      sendChatMessage({ message: newUtterance });
     }
+    // For non-final transcripts, just update the display
   };
 
   const handleMicToggle = () => {
@@ -285,7 +282,12 @@ const Interview = () => {
     streamerRef.current = new LiveAudioStreamer(
       sessionId, config, handleTranscriptUpdate,
       (metrics) => setAudioLevel(metrics.speechThreshold > 0 ? Math.min(metrics.currentRms / (metrics.speechThreshold * 1.5), 1) : 0),
-      () => setConnectionStatus('connected'),
+      () => {
+        setConnectionStatus('connected');
+        // MOCKTAGON INTEGRATION: Start listening when WebSocket connects
+        console.log('[Interview] WebSocket connected, transitioning to listening state');
+        conversationOrchestrator.startListening();
+      },
       () => setConnectionStatus('error'),
       WEBSOCKET_URL,
       selectedAudioDevice
