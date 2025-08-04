@@ -63,11 +63,14 @@ export const useConversationOrchestrator = (
   messagesRef.current = messages;
 
   // MOCKTAGON INTEGRATION: State transition with callbacks
+  // FIX: This now uses a functional update to avoid depending on `state`, making it more stable.
   const transitionToState = useCallback((newState: ConversationState) => {
-    console.log(`[ConversationOrchestrator] State transition: ${state} → ${newState}`);
-    setState(newState);
-    callbacks?.onStateChange?.(newState);
-  }, [state, callbacks]);
+    setState(prevState => {
+      if (prevState === newState) return prevState; // Avoid redundant transitions
+      callbacks?.onStateChange?.(newState);
+      return newState;
+    });
+  }, [callbacks]);
 
   // Generate unique message ID
   const generateMessageId = () => {
@@ -110,9 +113,22 @@ export const useConversationOrchestrator = (
       skipStateTransition?: boolean;
     }
   ) => {
+    // Debug: Only log when there are issues
+    if (messagesRef.current.length > 100) {
+      console.warn(`[ConversationOrchestrator] Large message history detected: ${messagesRef.current.length} messages`);
+    }
+    
+    // LIVECODE-INSIGHT PATTERN: Don't block messages based on state
+    // The WebSocket is always listening, state machine only coordinates conversation flow
+    // Skip message sending only if we're already waiting for a response to prevent spam
+    if (isWaitingForResponse) {
+      console.warn(`[ConversationOrchestrator] Already waiting for response, ignoring new message`);
+      return {};
+    }
+
     if (!content.trim()) {
       console.warn('[ConversationOrchestrator] Attempted to send empty message');
-      return;
+      return {};
     }
 
     // Add user message to conversation (unless hidden)
@@ -142,7 +158,8 @@ export const useConversationOrchestrator = (
         mode: config.mode || 'prod'
       };
 
-      console.log('[ConversationOrchestrator] Sending request to backend:', requestBody);
+      console.log('[ConversationOrchestrator] Sending request to backend:', config.backendUrl);
+      console.log('[ConversationOrchestrator] Request body:', requestBody);
 
       const response = await fetch(config.backendUrl, {
         method: 'POST',
@@ -150,6 +167,8 @@ export const useConversationOrchestrator = (
         body: JSON.stringify(requestBody),
         signal: abortControllerRef.current.signal,
       });
+
+      console.log('[ConversationOrchestrator] Response status:', response.status);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -276,14 +295,12 @@ export const useConversationOrchestrator = (
     transitionToState(ConversationState.CALIBRATING);
   }, [transitionToState]);
 
+  // FIX: This function is simplified to always transition to the LISTENING
+  // state after speaking is complete. This removes the ambiguous auto-transition
+  // logic and ensures the app is always ready for the next user input.
   const completeSpeaking = useCallback(() => {
-    // Auto-transition to listening if enabled
-    if (config.enableAutoTransition !== false) {
-      transitionToState(ConversationState.LISTENING);
-    } else {
-      transitionToState(ConversationState.IDLE);
-    }
-  }, [config.enableAutoTransition, transitionToState]);
+    transitionToState(ConversationState.LISTENING);
+  }, [transitionToState]);
 
   const resetConversation = useCallback(() => {
     setMessages([]);

@@ -105,6 +105,7 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
       if (sentences.length === 0) {
         setIsSpeaking(false);
         onSpeakingStateChange?.(false);
+        onComplete?.(); // MOCKTAGON: Call completion callback even when no sentences
         return;
       }
 
@@ -113,6 +114,7 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
         console.error("[Cartesia] Missing VITE_CARTESIA_API_KEY in your .env file!");
         setIsSpeaking(false);
         onSpeakingStateChange?.(false);
+        onComplete?.(); // MOCKTAGON: Call completion callback on API key error
         return;
       }
 
@@ -177,7 +179,21 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
         } catch { /* Not JSON, ignore */ }
       };
 
-      ws.onerror = (err) => console.error("[Cartesia] WebSocket error:", err);
+      ws.onerror = (err) => {
+        console.error("[Cartesia] WebSocket error:", err);
+        setIsSpeaking(false);
+        onSpeakingStateChange?.(false);
+        onComplete?.(); // MOCKTAGON: Call completion callback on WebSocket error
+      };
+
+      ws.onclose = () => {
+        // Ensure completion callback is called if WebSocket closes unexpectedly
+        if (isSpeaking && playingSourcesRef.current.size === 0) {
+          setIsSpeaking(false);
+          onSpeakingStateChange?.(false);
+          onComplete?.();
+        }
+      };
     };
 
     useEffect(() => {

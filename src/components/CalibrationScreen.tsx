@@ -6,9 +6,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Mic, MicOff, CheckCircle, AlertCircle, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// FIX: Update props for external control.
 interface CalibrationScreenProps {
-  onComplete?: () => void;
-  trigger?: React.ReactNode; // Custom trigger element
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onComplete: () => void;
 }
 
 type CalibrationPhase = 'detecting' | 'measuring' | 'calibrating' | 'ready';
@@ -20,8 +22,8 @@ interface CalibrationMetrics {
   currentRms: number;
 }
 
-export const CalibrationScreen = ({ onComplete, trigger }: CalibrationScreenProps) => {
-  const [isOpen, setIsOpen] = useState(false);
+export const CalibrationScreen = ({ open, onOpenChange, onComplete }: CalibrationScreenProps) => {
+  // The internal `isOpen` state is removed. We use the `open` prop instead.
   const [phase, setPhase] = useState<CalibrationPhase>('detecting');
   const [progress, setProgress] = useState(0);
   const [metrics, setMetrics] = useState<CalibrationMetrics>({
@@ -63,7 +65,7 @@ export const CalibrationScreen = ({ onComplete, trigger }: CalibrationScreenProp
 
   // Request microphone permission and start calibration when dialog opens
   useEffect(() => {
-    if (!isOpen) return;
+    if (!open) return;
     
     const requestMicrophone = async () => {
       try {
@@ -85,7 +87,7 @@ export const CalibrationScreen = ({ onComplete, trigger }: CalibrationScreenProp
         clearTimeout(calibrationTimer.current);
       }
     };
-  }, [isOpen]);
+  }, [open]);
 
   const startCalibrationProcess = (stream: MediaStream) => {
     // Phase 1: Detecting (1 second)
@@ -142,17 +144,16 @@ export const CalibrationScreen = ({ onComplete, trigger }: CalibrationScreenProp
     if (calibrationTimer.current) {
       clearTimeout(calibrationTimer.current);
     }
-    onComplete();
+    onComplete(); // This now calls the parent's onComplete handler directly.
   };
 
   const handleCompleteCalibration = () => {
-    setIsOpen(false);
-    onComplete?.();
+    onComplete(); // This also calls the parent's handler.
   };
 
-  const handleOpenChange = (open: boolean) => {
-    setIsOpen(open);
-    if (open) {
+  const handleOpenChange = (newOpenState: boolean) => {
+    onOpenChange(newOpenState);
+    if (newOpenState) {
       resetCalibration();
     }
   };
@@ -242,15 +243,9 @@ export const CalibrationScreen = ({ onComplete, trigger }: CalibrationScreenProp
   );
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        {trigger || (
-          <Button variant="outline" size="sm">
-            <Settings className="w-4 h-4 mr-2" />
-            Audio Calibration
-          </Button>
-        )}
-      </DialogTrigger>
+    // FIX: The Dialog is now controlled by the props from the parent component.
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      {/* The DialogTrigger is removed because this component no longer triggers itself. */}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Audio Calibration</DialogTitle>
@@ -265,5 +260,5 @@ export const CalibrationScreen = ({ onComplete, trigger }: CalibrationScreenProp
   );
 };
 
-// Default export with settings button trigger
-export default CalibrationScreen;
+// The default export is no longer needed as this is not a self-contained component.
+// export default CalibrationScreen;

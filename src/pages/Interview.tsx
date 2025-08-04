@@ -8,6 +8,7 @@ import LiveAudioStreamer from '@/components/LiveAudioStreamer';
 import CartesiaSpeaker, { CartesiaSpeakerHandle } from '@/components/CartesiaSpeaker';
 import { AiInterviewer } from '@/components/AiInterviewer';
 import { InteractiveQuestionPanel } from '@/components/InteractiveQuestionPanel';
+import { CalibrationScreen } from '@/components/CalibrationScreen'; // Ensure this is imported
 import { useNavigate } from 'react-router-dom';
 import { useConversationOrchestrator, ConversationState } from '@/hooks/useConversationOrchestrator';
 
@@ -15,6 +16,14 @@ import { useConversationOrchestrator, ConversationState } from '@/hooks/useConve
 // The .env variable already contains the full path, so we just use it directly.
 const BACKEND_URL = import.meta.env.VITE_LLM_BACKEND_URL;
 const WEBSOCKET_URL = import.meta.env.VITE_STT_WEBSOCKET_URL;
+
+// Validate critical environment variables
+if (!WEBSOCKET_URL) {
+  console.error('[Interview] CRITICAL ERROR: WEBSOCKET_URL is undefined!');
+}
+if (!BACKEND_URL) {
+  console.error('[Interview] CRITICAL ERROR: BACKEND_URL is undefined!');
+}
 
 export interface HistoryItem {
   role: 'user' | 'model';
@@ -26,24 +35,26 @@ const DUMMY_WELCOME_MESSAGE: HistoryItem = {
   parts: [{ text: "Welcome to the Aestim AI Accounting Assessment. I will be your interviewer today. When you're ready, we can begin." }]
 };
 
-const Interview = () => {
+export const Interview = () => {
   const navigate = useNavigate();
   
   // MOCKTAGON INTEGRATION: Replace old state management with conversation orchestrator
+  // Fix: Create stable sessionId to prevent recreating orchestrator on every render
+  const [sessionId] = useState(() => crypto.randomUUID());
+  
   const conversationOrchestrator = useConversationOrchestrator(
     {
-      sessionId: crypto.randomUUID(),
+      sessionId,
       backendUrl: BACKEND_URL,
       mode: 'prod',
       enableAutoTransition: true
     },
     {
       onStateChange: (newState) => {
-        console.log(`[Interview] Conversation state changed to: ${newState}`);
-        // Update derived states based on conversation state
+        // FIX: Removed the noisy console log.
+        // console.log(`[Interview] Conversation state changed to: ${newState}`);
         setIsListening(newState === ConversationState.LISTENING);
         setIsSpeaking(newState === ConversationState.SPEAKING);
-        // isWaitingForResponse now comes from conversation orchestrator
       },
       onInteractiveTask: (task) => {
         setInteractiveTask(task);
@@ -79,6 +90,13 @@ const Interview = () => {
     completeSpeaking,
     cleanup: cleanupOrchestrator
   } = conversationOrchestrator;
+
+  // --- FIX: Reverted state management for a direct startup ---
+  // 1. The calibration screen is now hidden by default.
+  const [showCalibration, setShowCalibration] = useState(false);
+  
+  // Transcript visibility state
+  const [showTranscripts, setShowTranscripts] = useState(true);
 
   const streamerRef = useRef<LiveAudioStreamer | null>(null);
   const speakerRef = useRef<CartesiaSpeakerHandle>(null);
@@ -141,41 +159,47 @@ const Interview = () => {
   useEffect(() => {
     const getAudioDevices = async () => {
       try {
-        console.log('[Interview] 🎤 Requesting microphone permission...');
         await navigator.mediaDevices.getUserMedia({ audio: true });
-        console.log('[Interview] ✅ Microphone permission granted!');
         
         const allDevices = await navigator.mediaDevices.enumerateDevices();
         const micDevices = allDevices.filter(device => device.kind === 'audioinput');
-        console.log('[Interview] 🎤 Found audio devices:', micDevices.length);
         
         setAudioDevices(micDevices);
         if (micDevices.length > 0) {
           setSelectedAudioDevice(micDevices[0].deviceId);
-          console.log('[Interview] 🎯 Selected device:', micDevices[0].label || micDevices[0].deviceId);
         }
       } catch (err) { 
-        console.error('[Interview] 🚫 Error accessing media devices:', err);
+        console.error('[Interview] Error accessing media devices:', err);
       }
     };
     getAudioDevices();
     
-    // MOCKTAGON INTEGRATION: Initialize with welcome message and start speaking
-    console.log('[Interview] 🗣️ Initializing with welcome message');
+    // Initialize with welcome message and start speaking - run only once
     conversationOrchestrator.addMessage('ai', DUMMY_WELCOME_MESSAGE.parts[0].text);
     setTextToSpeak(DUMMY_WELCOME_MESSAGE.parts[0].text);
-    // Start in speaking state to deliver welcome message
     conversationOrchestrator.transitionToState(ConversationState.SPEAKING);
-  }, [conversationOrchestrator]);
+  }, []); // Empty dependency array - run only once on mount
+
+  // --- FIX: This useEffect now starts the interview immediately on page load ---
+  // This mimics the direct connection logic from your interview-bot project.
+  useEffect(() => {
+    handleStart();
+  }, []); // The empty dependency array ensures this runs only once on mount.
 
   // MOCKTAGON INTEGRATION: Replace sendChatMessage with conversation orchestrator
+  // FIX: This is the single, consolidated version of the function.
+  // It handles all response types and prevents crashes from ignored calls.
   const sendChatMessage = async (payload: { message: string }) => {
-    console.log(`[sendChatMessage] Using conversation orchestrator to send: "${payload.message}"`);
-    
     const result = await orchestratorSendMessage(payload.message);
-    
+
+    // Check if the orchestrator ignored the call
+    if (!result) {
+      console.warn('[Interview] sendChatMessage call was ignored by the orchestrator (it was busy).');
+      return;
+    }
+
     if (result.error) {
-      console.error('[sendChatMessage] Error:', result.error);
+      console.error("Error from conversation orchestrator:", result.error);
       return;
     }
     
@@ -249,35 +273,33 @@ const Interview = () => {
   };
 
 
-  const handleTranscriptUpdate = (transcript: string, isFinal: boolean) => {
-    console.log(`[handleTranscriptUpdate] 🎤 Transcript: "${transcript}", Final: ${isFinal}, Current State: ${conversationState}`);
+  const handleTranscriptUpdate = (transcript: string, isFinal: boolean) => {    
+    // LIVECODE-INSIGHT PATTERN: WebSocket always processes transcripts
+    // State machine doesn't block transcript processing
     
-    // MOCKTAGON INTEGRATION: Ensure we're in listening state when receiving transcripts
-    if (conversationState !== ConversationState.LISTENING && conversationState !== ConversationState.THINKING) {
-      console.log(`[handleTranscriptUpdate] Transitioning to listening state from: ${conversationState}`);
-      conversationOrchestrator.startListening();
-    }
-    
-    // Stop AI speaking if user starts talking
+    // ECHO CANCELLATION: Stop AI speaking if user starts talking
     if (isSpeakingRef.current) {
-      console.log("[handleTranscriptUpdate] 🛑 AI is speaking, stopping playback.");
       speakerRef.current?.stop();
+      setIsSpeaking(false);
+      // Brief mute to prevent feedback loops
+      streamerRef.current?.setMuted(true);
+      setTimeout(() => {
+        if (streamerRef.current && isMicOn) {
+          streamerRef.current?.setMuted(false);
+        }
+      }, 300);
     }
     
     if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
     
     // Use the robust stitching function for building the utterance
     const newUtterance = intelligentStitch(currentUtteranceRef.current, transcript);
-    console.log(`[handleTranscriptUpdate] 🔗 Stitched utterance: "${newUtterance}"`);
     setCurrentUtterance(newUtterance);
     
     if (isFinal && newUtterance.trim()) {
-      console.log(`[handleTranscriptUpdate] ✅ Final utterance ready: "${newUtterance}"`);
       // Clear the current utterance and send to conversation orchestrator
       setCurrentUtterance("");
       sendChatMessage({ message: newUtterance });
-    } else {
-      console.log(`[handleTranscriptUpdate] 🔄 Partial transcript, waiting for more...`);
     }
   };
 
@@ -287,49 +309,74 @@ const Interview = () => {
     streamerRef.current?.setMuted(!newMicState);
   };
 
+  // 4. This function starts the WebSocket connection.
   const handleStart = () => {
-    console.log('[Interview] Starting audio stream...');
-    if (streamerRef.current) streamerRef.current.stopStreaming();
+    // Prevent multiple connections
+    if (connectionStatus === 'connecting' || connectionStatus === 'connected') {
+      return;
+    }
+    
+    // Cleanup any existing connection
+    if (streamerRef.current) {
+      streamerRef.current.stopStreaming();
+      streamerRef.current = null;
+    }
+    
     setConnectionStatus('connecting');
     setIsMicOn(true);
     const sessionId = crypto.randomUUID();
     const config = { sample_rate: 16000 };
     
-    console.log('[Interview] WebSocket URL:', WEBSOCKET_URL);
-    console.log('[Interview] Session ID:', sessionId);
-    console.log('[Interview] Selected device:', selectedAudioDevice);
-    
     streamerRef.current = new LiveAudioStreamer(
       sessionId, config, handleTranscriptUpdate,
       (metrics) => {
-        console.log('[Interview] Audio metrics:', metrics);
         setAudioLevel(metrics.speechThreshold > 0 ? Math.min(metrics.currentRms / (metrics.speechThreshold * 1.5), 1) : 0);
       },
       () => {
-        console.log('[Interview] WebSocket connected successfully!');
+        console.log('[Interview] WebSocket connected - ready for continuous listening');
         setConnectionStatus('connected');
-        // MOCKTAGON INTEGRATION: Start listening when WebSocket connects
-        conversationOrchestrator.startListening();
+        // LIVECODE-INSIGHT PATTERN: WebSocket is always listening regardless of conversation state
+        // The state machine only coordinates conversation flow, not WebSocket connectivity
       },
       (error) => {
-        console.error('[Interview] WebSocket connection error:', error);
+        console.error('[Interview] WebSocket error:', error);
         setConnectionStatus('error');
       },
       WEBSOCKET_URL,
       selectedAudioDevice
     );
     
-    console.log('[Interview] Starting streaming...');
     streamerRef.current.startStreaming();
   };
 
+  // Handle audio device changes
   useEffect(() => {
-    handleStart();
-    return () => {
-      streamerRef.current?.stopStreaming();
-      cleanupOrchestrator(); // MOCKTAGON: Use conversation orchestrator cleanup
-    };
-  }, [selectedAudioDevice, cleanupOrchestrator]);
+    if (selectedAudioDevice && streamerRef.current && connectionStatus === 'connected') {
+      // Device changed - will need restart on next user interaction
+    }
+  }, [selectedAudioDevice]);
+
+  // FIX: This function is now only for closing the manual calibration modal.
+  const handleCalibrationComplete = () => {
+    setShowCalibration(false);
+    // Re-enable the mic if it was muted by the manual calibration handler
+    streamerRef.current?.setMuted(false);
+    conversationOrchestrator.transitionToState(ConversationState.LISTENING);
+  };
+
+  const handleManualCalibration = () => {
+    // Pause everything and show the calibration modal
+    if (isSpeaking) {
+      speakerRef.current?.stop();
+    }
+    streamerRef.current?.setMuted(true);
+    conversationOrchestrator.transitionToState(ConversationState.CALIBRATING);
+    setShowCalibration(true);
+  };
+
+  const handleTranscriptToggle = () => {
+    setShowTranscripts(prev => !prev);
+  };
 
   const handleEndInterview = () => {
     streamerRef.current?.stopStreaming();
@@ -341,15 +388,9 @@ const Interview = () => {
 
   // --- NEW, ROBUST MAIN UI ---
   return (
-    <div className="flex flex-col h-screen bg-slate-100 dark:bg-slate-900">
-      <header className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm shrink-0">
-        <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">Accounting Assessment</h1>
-        <div className="text-sm text-muted-foreground">
-          Powered by <strong>Aestim AI</strong>
-        </div>
-      </header>
-      
-      <div className="flex-1 min-h-0 p-8 flex flex-col">
+    <div className="relative h-screen w-screen overflow-hidden bg-background flex flex-col">
+      {/* --- FIX: Main UI is no longer hidden by default --- */}
+      <div className={`flex-1 min-h-0 p-8 flex flex-col animate-fade-in`}>
         {/* The AiInterviewer is now outside of the conditional rendering, so it always exists for GSAP to target. */}
         <div className="relative h-36 mb-4">
           <div ref={avatarRef} className="absolute top-0 left-1/2">
@@ -391,13 +432,21 @@ const Interview = () => {
         </AnimatePresence>
       </div>
 
-      {/* DEBUG: Show current utterance being transcribed */}
-      {currentUtterance && (
-        <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg z-50">
-          <div className="text-xs opacity-75">Live Transcript:</div>
-          <div className="font-mono">"{currentUtterance}"</div>
+      {/* Live transcript display - toggleable */}
+      {showTranscripts && currentUtterance && (
+        <div className="absolute bottom-24 left-4 bg-black/50 text-white p-3 rounded-lg shadow-lg max-w-md">
+          <div className="text-xs text-gray-300 mb-1">Live Transcript:</div>
+          <div className="font-mono text-sm">"{currentUtterance}"</div>
         </div>
       )}
+
+
+      {/* --- FIX: The calibration screen is now fully controlled by this component --- */}
+      <CalibrationScreen 
+        open={showCalibration}
+        onOpenChange={setShowCalibration}
+        onComplete={handleCalibrationComplete}
+      />
 
       <AudioControls
         isMicOn={isMicOn}
@@ -409,6 +458,9 @@ const Interview = () => {
         connectionStatus={connectionStatus}
         conversationState={conversationState} // MOCKTAGON: Pass conversation state
         onEndInterview={handleEndInterview}
+        onCalibrate={handleManualCalibration} // Pass manual calibration handler
+        showTranscripts={showTranscripts} // Pass transcript visibility state
+        onTranscriptToggle={handleTranscriptToggle} // Pass transcript toggle handler
       />
       <CartesiaSpeaker
         ref={speakerRef}
@@ -418,7 +470,7 @@ const Interview = () => {
         onSpeakingStateChange={setIsSpeaking}
         onComplete={() => {
           console.log('[Interview] Speaking completed, transitioning to listening');
-          completeSpeaking(); // MOCKTAGON: Auto-transition after speaking
+          completeSpeaking();
         }}
       />
     </div>
