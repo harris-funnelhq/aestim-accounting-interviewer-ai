@@ -8,11 +8,14 @@ export interface CartesiaSpeakerHandle {
 
 interface CartesiaSpeakerProps {
   text: string;
+  trigger?: boolean; // MOCKTAGON: Trigger-based activation
+  mode?: "first" | "full"; // MOCKTAGON: Speaking modes  
   onSpeakingStateChange?: (isSpeaking: boolean) => void;
+  onComplete?: () => void; // MOCKTAGON: Completion callback
 }
 
 const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
-  ({ text, onSpeakingStateChange }, ref) => {
+  ({ text, trigger = false, mode = "full", onSpeakingStateChange, onComplete }, ref) => {
     const [isSpeaking, setIsSpeaking] = useState(false);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const playbackTimeRef = useRef<number>(0);
@@ -87,6 +90,7 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
           setTimeout(() => {
             setIsSpeaking(false);
             onSpeakingStateChange?.(false);
+            onComplete?.(); // MOCKTAGON: Trigger completion callback
           }, pauseDurationMs);
         }
       };
@@ -123,14 +127,17 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
 
       ws.onopen = () => {
         if (ws.readyState !== WebSocket.OPEN) return;
-        sentences.forEach((sentence, index) => {
+        // MOCKTAGON: Support different speaking modes
+        if (mode === "first") {
+          // Only speak the first sentence
+          const firstSentence = sentences[0];
           const message = {
             model_id: 'sonic-2',
             voice: { mode: 'id', id: graceVoiceId },
             language: 'en',
             context_id: contextId,
-            transcript: sentence,
-            continue: index !== sentences.length - 1,
+            transcript: firstSentence,
+            continue: false,
             output_format: {
               container: 'raw',
               encoding: 'pcm_f32le',
@@ -138,7 +145,25 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
             },
           };
           ws.send(JSON.stringify(message));
-        });
+        } else {
+          // Full mode: speak all sentences
+          sentences.forEach((sentence, index) => {
+            const message = {
+              model_id: 'sonic-2',
+              voice: { mode: 'id', id: graceVoiceId },
+              language: 'en',
+              context_id: contextId,
+              transcript: sentence,
+              continue: index !== sentences.length - 1,
+              output_format: {
+                container: 'raw',
+                encoding: 'pcm_f32le',
+                sample_rate: 44100,
+              },
+            };
+            ws.send(JSON.stringify(message));
+          });
+        }
       };
 
       ws.onmessage = async (event) => {
@@ -156,11 +181,16 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
     };
 
     useEffect(() => {
-      if (text && text !== lastSpokenTextRef.current) {
+      // MOCKTAGON: Trigger-based activation - only speak when trigger is true or changes
+      if (trigger && text && text !== lastSpokenTextRef.current) {
+        lastSpokenTextRef.current = text;
+        speakSentences(text);
+      } else if (!trigger && text && text !== lastSpokenTextRef.current) {
+        // Fallback: Auto-speak when trigger is false (backward compatibility)
         lastSpokenTextRef.current = text;
         speakSentences(text);
       }
-    }, [text]);
+    }, [text, trigger, mode]);
 
     return <div className="hidden" />;
   }
