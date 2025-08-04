@@ -43,7 +43,7 @@ const Interview = () => {
         // Update derived states based on conversation state
         setIsListening(newState === ConversationState.LISTENING);
         setIsSpeaking(newState === ConversationState.SPEAKING);
-        setIsWaitingForResponse(newState === ConversationState.THINKING);
+        // isWaitingForResponse now comes from conversation orchestrator
       },
       onInteractiveTask: (task) => {
         setInteractiveTask(task);
