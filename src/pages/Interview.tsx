@@ -141,16 +141,27 @@ const Interview = () => {
   useEffect(() => {
     const getAudioDevices = async () => {
       try {
+        console.log('[Interview] 🎤 Requesting microphone permission...');
         await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('[Interview] ✅ Microphone permission granted!');
+        
         const allDevices = await navigator.mediaDevices.enumerateDevices();
         const micDevices = allDevices.filter(device => device.kind === 'audioinput');
+        console.log('[Interview] 🎤 Found audio devices:', micDevices.length);
+        
         setAudioDevices(micDevices);
-        if (micDevices.length > 0) setSelectedAudioDevice(micDevices[0].deviceId);
-      } catch (err) { console.error("Error accessing media devices:", err); }
+        if (micDevices.length > 0) {
+          setSelectedAudioDevice(micDevices[0].deviceId);
+          console.log('[Interview] 🎯 Selected device:', micDevices[0].label || micDevices[0].deviceId);
+        }
+      } catch (err) { 
+        console.error('[Interview] 🚫 Error accessing media devices:', err);
+      }
     };
     getAudioDevices();
     
     // MOCKTAGON INTEGRATION: Initialize with welcome message and start speaking
+    console.log('[Interview] 🗣️ Initializing with welcome message');
     conversationOrchestrator.addMessage('ai', DUMMY_WELCOME_MESSAGE.parts[0].text);
     setTextToSpeak(DUMMY_WELCOME_MESSAGE.parts[0].text);
     // Start in speaking state to deliver welcome message
@@ -239,16 +250,17 @@ const Interview = () => {
 
 
   const handleTranscriptUpdate = (transcript: string, isFinal: boolean) => {
-    console.log(`[handleTranscriptUpdate] Received transcript: "${transcript}", Is Final: ${isFinal}`);
+    console.log(`[handleTranscriptUpdate] 🎤 Transcript: "${transcript}", Final: ${isFinal}, Current State: ${conversationState}`);
     
     // MOCKTAGON INTEGRATION: Ensure we're in listening state when receiving transcripts
     if (conversationState !== ConversationState.LISTENING && conversationState !== ConversationState.THINKING) {
+      console.log(`[handleTranscriptUpdate] Transitioning to listening state from: ${conversationState}`);
       conversationOrchestrator.startListening();
     }
     
     // Stop AI speaking if user starts talking
     if (isSpeakingRef.current) {
-      console.log("[handleTranscriptUpdate] AI is speaking, stopping playback.");
+      console.log("[handleTranscriptUpdate] 🛑 AI is speaking, stopping playback.");
       speakerRef.current?.stop();
     }
     
@@ -256,15 +268,17 @@ const Interview = () => {
     
     // Use the robust stitching function for building the utterance
     const newUtterance = intelligentStitch(currentUtteranceRef.current, transcript);
+    console.log(`[handleTranscriptUpdate] 🔗 Stitched utterance: "${newUtterance}"`);
     setCurrentUtterance(newUtterance);
     
     if (isFinal && newUtterance.trim()) {
-      console.log(`[handleTranscriptUpdate] Final utterance: "${newUtterance}"`);
+      console.log(`[handleTranscriptUpdate] ✅ Final utterance ready: "${newUtterance}"`);
       // Clear the current utterance and send to conversation orchestrator
       setCurrentUtterance("");
       sendChatMessage({ message: newUtterance });
+    } else {
+      console.log(`[handleTranscriptUpdate] 🔄 Partial transcript, waiting for more...`);
     }
-    // For non-final transcripts, just update the display
   };
 
   const handleMicToggle = () => {
@@ -274,24 +288,38 @@ const Interview = () => {
   };
 
   const handleStart = () => {
+    console.log('[Interview] Starting audio stream...');
     if (streamerRef.current) streamerRef.current.stopStreaming();
     setConnectionStatus('connecting');
     setIsMicOn(true);
     const sessionId = crypto.randomUUID();
     const config = { sample_rate: 16000 };
+    
+    console.log('[Interview] WebSocket URL:', WEBSOCKET_URL);
+    console.log('[Interview] Session ID:', sessionId);
+    console.log('[Interview] Selected device:', selectedAudioDevice);
+    
     streamerRef.current = new LiveAudioStreamer(
       sessionId, config, handleTranscriptUpdate,
-      (metrics) => setAudioLevel(metrics.speechThreshold > 0 ? Math.min(metrics.currentRms / (metrics.speechThreshold * 1.5), 1) : 0),
+      (metrics) => {
+        console.log('[Interview] Audio metrics:', metrics);
+        setAudioLevel(metrics.speechThreshold > 0 ? Math.min(metrics.currentRms / (metrics.speechThreshold * 1.5), 1) : 0);
+      },
       () => {
+        console.log('[Interview] WebSocket connected successfully!');
         setConnectionStatus('connected');
         // MOCKTAGON INTEGRATION: Start listening when WebSocket connects
-        console.log('[Interview] WebSocket connected, transitioning to listening state');
         conversationOrchestrator.startListening();
       },
-      () => setConnectionStatus('error'),
+      (error) => {
+        console.error('[Interview] WebSocket connection error:', error);
+        setConnectionStatus('error');
+      },
       WEBSOCKET_URL,
       selectedAudioDevice
     );
+    
+    console.log('[Interview] Starting streaming...');
     streamerRef.current.startStreaming();
   };
 
@@ -362,6 +390,14 @@ const Interview = () => {
           )}
         </AnimatePresence>
       </div>
+
+      {/* DEBUG: Show current utterance being transcribed */}
+      {currentUtterance && (
+        <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg z-50">
+          <div className="text-xs opacity-75">Live Transcript:</div>
+          <div className="font-mono">"{currentUtterance}"</div>
+        </div>
+      )}
 
       <AudioControls
         isMicOn={isMicOn}
