@@ -20,7 +20,7 @@ export default class LiveAudioStreamer {
 
   // --- ADDING MISSING PROPERTIES ---
   private silenceTimer: number | null = null;
-  private readonly SILENCE_IDLE_MS = 4000;
+  private readonly SILENCE_IDLE_MS = 2500;
   private lastTranscript = "";
   // --- END OF ADDITIONS ---
 

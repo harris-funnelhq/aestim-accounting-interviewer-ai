@@ -60,8 +60,8 @@ const ErrorState = ({ message, onGoBack }: { message: string, onGoBack: () => vo
 
 // --- Main Component (Rewritten for Robustness) ---
 export const ResultsPage = ({
-  candidateName = "Alex",
-  companyName = "TechCorp Solutions"
+  candidateName = "Krishna",
+  companyName = "Graydot Technologies",
 }: ResultsPageProps) => {
   const navigate = useNavigate();
   const location = useLocation();

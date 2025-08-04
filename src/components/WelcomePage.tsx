@@ -10,9 +10,9 @@ interface WelcomePageProps {
 }
 
 export const WelcomePage = ({
-  candidateName = "Alex",
-  jobTitle = "Senior Accountant",
-  companyName = "TechCorp Solutions",
+  candidateName = "Krishna",
+  jobTitle = "Accountant",
+  companyName = "Graydot Technologies",
   onGetStarted
 }: WelcomePageProps) => {
   return (

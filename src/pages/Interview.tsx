@@ -250,15 +250,47 @@ const Interview = () => {
     }
   };
 
-  const smartStitch = (baseText: string, newFragment: string) => {
-    console.log(`[smartStitch] Base: "${baseText}", Fragment: "${newFragment}"`);
+  // --- NEW, DEFINITIVE STITCHING LOGIC ---
+  // This version correctly handles punctuation and case differences.
+  const intelligentStitch = (baseText: string, newFragment: string): string => {
     const base = baseText.trim();
     const fragment = newFragment.trim();
-    if (fragment.toLowerCase().startsWith(base.toLowerCase())) {
-      return fragment;
+
+    if (!base) return fragment;
+    if (!fragment) return base;
+
+    const baseWords = base.split(/\s+/);
+    const fragmentWords = fragment.split(/\s+/);
+
+    let overlapLength = 0;
+
+    // A helper function to clean words for comparison ONLY.
+    const cleanWord = (word: string) => word.replace(/[.,?]/g, '').toLowerCase();
+
+    // Find the length of the longest suffix of `baseWords` that is a prefix of `fragmentWords`
+    for (let i = Math.min(baseWords.length, fragmentWords.length); i >= 1; i--) {
+      const baseSuffix = baseWords.slice(baseWords.length - i);
+      const fragmentPrefix = fragmentWords.slice(0, i);
+
+      // FIX: Compare the *cleaned* versions of the words to find the true overlap.
+      const cleanedBaseSuffix = baseSuffix.map(cleanWord).join(' ');
+      const cleanedFragmentPrefix = fragmentPrefix.map(cleanWord).join(' ');
+
+      if (cleanedBaseSuffix === cleanedFragmentPrefix) {
+        overlapLength = i;
+        // We've found the longest possible overlap, so we can stop searching.
+        break;
+      }
     }
-    return `${base} ${fragment}`;
+
+    // Append only the part of the new fragment that doesn't overlap.
+    const nonOverlappingFragment = fragmentWords.slice(overlapLength).join(' ');
+    
+    // Combine the original base text with the new, non-overlapping part.
+    // This ensures punctuation from the original text is preserved.
+    return (base + ' ' + nonOverlappingFragment).trim();
   };
+
 
   const handleTranscriptUpdate = (transcript: string, isFinal: boolean) => {
     console.log(`[handleTranscriptUpdate] Received transcript: "${transcript}", Is Final: ${isFinal}`);
@@ -269,7 +301,8 @@ const Interview = () => {
       speakerRef.current?.stop();
     }
     if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
-    const newUtterance = smartStitch(currentUtteranceRef.current, transcript);
+    // Use the new, more robust stitching function
+    const newUtterance = intelligentStitch(currentUtteranceRef.current, transcript);
     setCurrentUtterance(newUtterance);
     if (isFinal && newUtterance.trim()) {
       console.log(`[handleTranscriptUpdate] Final utterance detected. Adding to message queue: "${newUtterance}"`);
