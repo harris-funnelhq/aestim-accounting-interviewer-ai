@@ -19,6 +19,11 @@ export interface ConversationMessage {
     isInteractive?: boolean;
     taskType?: string;
     confidence?: number;
+    // NEW: Question tracking
+    questionId?: string;
+    questionStatus?: 'pending' | 'addressed' | 'dodged';
+    attemptCount?: number;
+    competencyArea?: string;
   };
 }
 
@@ -26,6 +31,36 @@ export interface ConversationMessage {
 export interface HistoryItem {
   role: 'user' | 'model';
   parts: { text: string }[];
+}
+
+// NEW: Question validation state
+export interface QuestionState {
+  id: string;
+  text: string;
+  competencyArea: 'foundational' | 'transaction' | 'reporting' | 'practical';
+  status: 'pending' | 'addressed' | 'dodged' | 'follow_up_needed';
+  attempts: number;
+  maxAttempts: 3;
+  timestamp: Date;
+}
+
+export interface QuestionValidationState {
+  currentQuestion?: QuestionState;
+  completedQuestions: QuestionState[];
+  dodgedQuestions: QuestionState[];
+  competencyCoverage: {
+    foundational: number; // 0-100%
+    transaction: number;
+    reporting: number;
+    practical: number;
+  };
+}
+
+export interface ResponseAnalysis {
+  type: 'question_addressed' | 'question_dodged' | 'unclear';
+  confidence: number;
+  accountingTerms?: string[];
+  reasoning: string;
 }
 
 interface ConversationOrchestratorConfig {
@@ -51,6 +86,19 @@ export const useConversationOrchestrator = (
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [currentInteractiveTask, setCurrentInteractiveTask] = useState<any | null>(null);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
+  
+  // NEW: Question validation state
+  const [questionValidationState, setQuestionValidationState] = useState<QuestionValidationState>({
+    currentQuestion: undefined,
+    completedQuestions: [],
+    dodgedQuestions: [],
+    competencyCoverage: {
+      foundational: 0,
+      transaction: 0,
+      reporting: 0,
+      practical: 0
+    }
+  });
   
   // Internal refs for state management
   const stateRef = useRef(state);
