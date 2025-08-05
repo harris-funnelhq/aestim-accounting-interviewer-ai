@@ -352,12 +352,25 @@ export const useConversationOrchestrator = (
     abortControllerRef.current = new AbortController();
 
     try {
+      // NEW: Analyze user response for question validation
+      let responseAnalysis: ResponseAnalysis | null = null;
+      if (questionValidationState.currentQuestion && !options?.skipStateTransition) {
+        responseAnalysis = analyzeResponse(content, questionValidationState.currentQuestion);
+        console.log('[ConversationOrchestrator] Response analysis:', responseAnalysis);
+      }
+
       // Prepare request in Aestim's format
       const historyForAPI = convertToHistoryFormat(messagesRef.current);
       const requestBody = {
         history: historyForAPI,
         newUserMessage: content,
-        mode: config.mode || 'prod'
+        mode: config.mode || 'prod',
+        // NEW: Include question context for backend
+        questionContext: {
+          currentQuestion: questionValidationState.currentQuestion,
+          responseAnalysis,
+          competencyCoverage: questionValidationState.competencyCoverage
+        }
       };
 
       console.log('[ConversationOrchestrator] Sending request to backend:', config.backendUrl);
@@ -401,10 +414,19 @@ export const useConversationOrchestrator = (
       // AESTIM INTEGRATION: Parse response and handle interactive tasks
       const parsedResponse = parseAIResponse(rawAiMessage);
       
+      // NEW: Update question state based on response analysis
+      if (responseAnalysis && questionValidationState.currentQuestion) {
+        updateQuestionState(responseAnalysis, content);
+      }
+
       // Add AI message to conversation
       const aiMessage = addMessage('ai', parsedResponse.textForHistory, {
         isInteractive: parsedResponse.responseType === 'interactive',
-        taskType: parsedResponse.problemData?.taskType
+        taskType: parsedResponse.problemData?.taskType,
+        // NEW: Include question tracking in AI message metadata
+        questionId: questionValidationState.currentQuestion?.id,
+        questionStatus: responseAnalysis?.type === 'question_addressed' ? 'addressed' : 
+                      responseAnalysis?.type === 'question_dodged' ? 'dodged' : 'pending'
       });
 
       // Handle interactive tasks
@@ -593,6 +615,11 @@ export const useConversationOrchestrator = (
     currentInteractiveTask,
     isWaitingForResponse,
     isInteractive: currentInteractiveTask !== null,
+    
+    // NEW: Question validation state
+    questionValidationState,
+    currentQuestion: questionValidationState.currentQuestion,
+    competencyCoverage: questionValidationState.competencyCoverage,
 
     // Actions
     sendMessage,
@@ -603,6 +630,10 @@ export const useConversationOrchestrator = (
     completeSpeaking,
     resetConversation,
     cleanup,
+    
+    // NEW: Question validation actions
+    analyzeResponse,
+    updateQuestionState,
 
     // Utilities
     convertToHistoryFormat,
