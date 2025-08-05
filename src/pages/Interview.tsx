@@ -95,8 +95,8 @@ export const Interview = () => {
   // 1. The calibration screen is now hidden by default.
   const [showCalibration, setShowCalibration] = useState(false);
   
-  // Transcript visibility state
-  const [showTranscripts, setShowTranscripts] = useState(true);
+  // Transcript visibility state - OFF by default
+  const [showTranscripts, setShowTranscripts] = useState(false);
 
   const streamerRef = useRef<LiveAudioStreamer | null>(null);
   const speakerRef = useRef<CartesiaSpeakerHandle>(null);
@@ -287,7 +287,7 @@ export const Interview = () => {
         if (streamerRef.current && isMicOn) {
           streamerRef.current?.setMuted(false);
         }
-      }, 300);
+      }, 400);
     }
     
     if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
@@ -469,7 +469,7 @@ export const Interview = () => {
         conversationState={conversationState} // MOCKTAGON: Pass conversation state
         onEndInterview={handleEndInterview}
         onCalibrate={handleManualCalibration} // Pass manual calibration handler
-        showTranscripts={showTranscripts} // Pass transcript visibility state
+        showTranscripts={showTranscripts} // Pass transcript visibility state (default: false)
         onTranscriptToggle={handleTranscriptToggle} // Pass transcript toggle handler
         onReconnect={handleReconnect} // Pass STT reconnection handler
       />
