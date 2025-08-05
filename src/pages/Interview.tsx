@@ -33,7 +33,7 @@ export interface HistoryItem {
 
 const DUMMY_WELCOME_MESSAGE: HistoryItem = {
   role: 'model',
-  parts: [{ text: "Hey there! Fun fact - 'budget' comes from French 'bougette' meaning 'little bag.' Medieval finance ministers literally used leather pouches! Pretty cool, right? I'm Alexa, and I'll be chatting with you about accounting today. How's your day going?" }]
+  parts: [{ text: "Hey there! Fun fact - 'budget' comes from French 'bougette' meaning 'little bag.' Medieval finance ministers literally used leather pouches! Pretty cool, right? I'm Smriti, and I'll be chatting with you about accounting today. How's your day going?" }]
 };
 
 export const Interview = () => {
