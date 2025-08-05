@@ -180,6 +180,13 @@ export const useConversationOrchestrator = (
       }
 
       const rawAiMessage = data.aiMessage;
+      
+      console.log('[ConversationOrchestrator] Raw AI response received:', {
+        length: rawAiMessage?.length || 0,
+        startsWithJson: rawAiMessage?.trim().startsWith('{'),
+        containsJsonBlock: rawAiMessage?.includes('```json'),
+        preview: rawAiMessage?.substring(0, 150) + '...'
+      });
 
       // Check for interview termination signal
       if (typeof rawAiMessage === 'string' && rawAiMessage.includes('[END_INTERVIEW]')) {
@@ -230,6 +237,41 @@ export const useConversationOrchestrator = (
     }
   }, [config, addMessage, convertToHistoryFormat, transitionToState, callbacks]);
 
+  // Helper function to extract meaningful text from malformed JSON
+  const extractTextFromMalformedJson = (rawMessage: string): string | null => {
+    try {
+      // Look for common patterns in malformed AI responses
+      const patterns = [
+        /"response":\s*"([^"]+)"/,
+        /"message":\s*"([^"]+)"/,
+        /"text":\s*"([^"]+)"/,
+        /"content":\s*"([^"]+)"/
+      ];
+      
+      for (const pattern of patterns) {
+        const match = rawMessage.match(pattern);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+      
+      // If no patterns match, try to find any quoted text that looks like a response
+      const quotedTextRegex = /"([^"]{20,})"/g;
+      const matches = [...rawMessage.matchAll(quotedTextRegex)];
+      if (matches.length > 0) {
+        // Return the longest quoted string, which is likely the main response
+        return matches.reduce((longest, current) => 
+          current[1].length > longest.length ? current[1] : longest, ''
+        );
+      }
+      
+      return null;
+    } catch (e) {
+      console.warn('[ConversationOrchestrator] Error extracting text from malformed JSON:', e);
+      return null;
+    }
+  };
+
   // AESTIM INTEGRATION: Parse AI response (similar to Interview.tsx logic)
   const parseAIResponse = (rawAiMessage: string) => {
     let textForHistory: string;
@@ -253,13 +295,39 @@ export const useConversationOrchestrator = (
 
     if (jsonString) {
       try {
-        const parsedResponse = JSON.parse(jsonString);
-        textForHistory = parsedResponse.response || "An interactive task is ready.";
-        responseType = parsedResponse.type || 'normal';
-        problemData = parsedResponse.problem || null;
+        // Clean up common JSON formatting issues
+        let cleanJsonString = jsonString.trim();
+        
+        // Remove any trailing commas before closing braces/brackets
+        cleanJsonString = cleanJsonString.replace(/,(\s*[}\]])/g, '$1');
+        
+        // Fix common quote issues
+        cleanJsonString = cleanJsonString.replace(/'/g, '"');
+        
+        // Try to find and fix incomplete JSON objects
+        const braces = (cleanJsonString.match(/\{/g) || []).length;
+        const closingBraces = (cleanJsonString.match(/\}/g) || []).length;
+        
+        if (braces > closingBraces) {
+          console.warn('[ConversationOrchestrator] Incomplete JSON detected, attempting to fix...');
+          cleanJsonString += '}';
+        }
+        
+        const parsedResponse = JSON.parse(cleanJsonString);
+        textForHistory = parsedResponse.response || parsedResponse.message || "An interactive task is ready.";
+        responseType = parsedResponse.type || parsedResponse.responseType || 'normal';
+        problemData = parsedResponse.problem || parsedResponse.task || null;
+        
+        console.log('[ConversationOrchestrator] Successfully parsed JSON response:', {
+          type: responseType,
+          hasTask: !!problemData
+        });
       } catch (e) {
         console.warn('[ConversationOrchestrator] Failed to parse JSON. Treating as plain text.', e);
-        textForHistory = rawAiMessage;
+        console.log('[ConversationOrchestrator] Raw JSON string that failed:', jsonString.substring(0, 200) + '...');
+        
+        // Try to extract meaningful text from malformed JSON
+        textForHistory = extractTextFromMalformedJson(rawAiMessage) || rawAiMessage;
       }
     } else {
       textForHistory = rawAiMessage;
