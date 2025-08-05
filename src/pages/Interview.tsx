@@ -349,6 +349,16 @@ export const Interview = () => {
     streamerRef.current.startStreaming();
   };
 
+  // Reconnect function for STT failures
+  const handleReconnect = () => {
+    console.log('[Interview] Attempting to reconnect STT...');
+    setConnectionStatus('idle');
+    // Small delay to ensure cleanup, then restart
+    setTimeout(() => {
+      handleStart();
+    }, 500);
+  };
+
   // Handle audio device changes
   useEffect(() => {
     if (selectedAudioDevice && streamerRef.current && connectionStatus === 'connected') {
@@ -461,6 +471,7 @@ export const Interview = () => {
         onCalibrate={handleManualCalibration} // Pass manual calibration handler
         showTranscripts={showTranscripts} // Pass transcript visibility state
         onTranscriptToggle={handleTranscriptToggle} // Pass transcript toggle handler
+        onReconnect={handleReconnect} // Pass STT reconnection handler
       />
       <CartesiaSpeaker
         ref={speakerRef}

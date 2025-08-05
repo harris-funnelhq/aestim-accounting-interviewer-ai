@@ -10,7 +10,7 @@ import { ConnectionStatus } from './ConnectionStatus';
 import { motion } from 'framer-motion';
 import { cn } from "@/lib/utils";
 import { Button } from './ui/button';
-import { Settings, Brain, Ear, MessageSquare, CheckCircle, FileText, EyeOff } from 'lucide-react';
+import { Settings, Brain, Ear, MessageSquare, CheckCircle, FileText, EyeOff, RefreshCw } from 'lucide-react';
 import { ConversationState } from '@/hooks/useConversationOrchestrator';
 
 interface AudioControlsProps {
@@ -26,6 +26,7 @@ interface AudioControlsProps {
   onCalibrate?: () => void; // Manual calibration trigger
   showTranscripts?: boolean; // Transcript visibility toggle
   onTranscriptToggle?: () => void; // Transcript toggle handler
+  onReconnect?: () => void; // STT reconnection handler
 }
 
 // Mic button remains the same - it's clean and effective.
@@ -161,6 +162,7 @@ export const AudioControls = ({
   onCalibrate, // Manual calibration trigger
   showTranscripts = true, // Default to showing transcripts
   onTranscriptToggle, // Transcript toggle handler
+  onReconnect, // STT reconnection handler
 }: AudioControlsProps) => {
   const waveformLevel = isMicOn && connectionStatus === 'connected' ? audioLevel : 0;
 
@@ -190,6 +192,18 @@ export const AudioControls = ({
             </SelectContent>
           </Select>
           <ConnectionStatus status={connectionStatus} />
+          {/* STT Reconnect Button - Show when connection failed */}
+          {connectionStatus === 'error' && onReconnect && (
+            <Button 
+              variant="outline" 
+              size="default" 
+              className="h-12 text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950/20" 
+              onClick={onReconnect}
+              title="Reconnect to speech service"
+            >
+              <RefreshCw className="w-5 h-5" />
+            </Button>
+          )}
           {/* MOCKTAGON INTEGRATION: Conversation State Indicator */}
           <ConversationStateIndicator state={conversationState} />
           {/* MOCKTAGON INTEGRATION: Manual Calibration Button */}
