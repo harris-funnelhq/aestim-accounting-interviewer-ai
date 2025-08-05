@@ -21,7 +21,7 @@ export const WelcomePage = ({
       <header className="px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-gradient-primary rounded-lg flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-lg">TC</span>
+            <span className="text-primary-foreground font-bold text-lg">GT</span>
           </div>
           <span className="text-lg font-semibold text-foreground">{companyName}</span>
         </div>
