@@ -19,6 +19,11 @@ export interface ConversationMessage {
     isInteractive?: boolean;
     taskType?: string;
     confidence?: number;
+    // NEW: Question tracking
+    questionId?: string;
+    questionStatus?: 'pending' | 'addressed' | 'dodged';
+    attemptCount?: number;
+    competencyArea?: string;
   };
 }
 
@@ -26,6 +31,36 @@ export interface ConversationMessage {
 export interface HistoryItem {
   role: 'user' | 'model';
   parts: { text: string }[];
+}
+
+// NEW: Question validation state
+export interface QuestionState {
+  id: string;
+  text: string;
+  competencyArea: 'foundational' | 'transaction' | 'reporting' | 'practical';
+  status: 'pending' | 'addressed' | 'dodged' | 'follow_up_needed';
+  attempts: number;
+  maxAttempts: 3;
+  timestamp: Date;
+}
+
+export interface QuestionValidationState {
+  currentQuestion?: QuestionState;
+  completedQuestions: QuestionState[];
+  dodgedQuestions: QuestionState[];
+  competencyCoverage: {
+    foundational: number; // 0-100%
+    transaction: number;
+    reporting: number;
+    practical: number;
+  };
+}
+
+export interface ResponseAnalysis {
+  type: 'question_addressed' | 'question_dodged' | 'unclear';
+  confidence: number;
+  accountingTerms?: string[];
+  reasoning: string;
 }
 
 interface ConversationOrchestratorConfig {
@@ -52,6 +87,19 @@ export const useConversationOrchestrator = (
   const [currentInteractiveTask, setCurrentInteractiveTask] = useState<any | null>(null);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
   
+  // NEW: Question validation state
+  const [questionValidationState, setQuestionValidationState] = useState<QuestionValidationState>({
+    currentQuestion: undefined,
+    completedQuestions: [],
+    dodgedQuestions: [],
+    competencyCoverage: {
+      foundational: 0,
+      transaction: 0,
+      reporting: 0,
+      practical: 0
+    }
+  });
+  
   // Internal refs for state management
   const stateRef = useRef(state);
   const messagesRef = useRef(messages);
@@ -77,6 +125,160 @@ export const useConversationOrchestrator = (
     messageIdCounter.current += 1;
     return `msg_${Date.now()}_${messageIdCounter.current}`;
   };
+
+  // NEW: Helper functions for question validation
+  const extractAccountingTerms = (text: string): string[] => {
+    const accountingTerms = [
+      // Fundamental terms
+      'accounting', 'equation', 'assets', 'liabilities', 'equity', 'balance', 'sheet',
+      'debit', 'credit', 'double-entry', 'bookkeeping', 'journal', 'ledger',
+      // Financial statements
+      'income', 'statement', 'profit', 'loss', 'p&l', 'pnl', 'revenue', 'expense',
+      'cash', 'flow', 'balance', 'financial', 'position',
+      // Transaction terms
+      'transaction', 'receivable', 'payable', 'accounts', 'voucher', 'invoice',
+      'payment', 'receipt', 'sale', 'purchase', 'inventory',
+      // Practical terms
+      'depreciation', 'amortization', 'ratio', 'analysis', 'current', 'fixed',
+      'working', 'capital', 'liquidity', 'solvency'
+    ];
+    
+    const words = text.toLowerCase().split(/\W+/);
+    return accountingTerms.filter(term => 
+      words.some(word => word.includes(term) || term.includes(word))
+    );
+  };
+
+  const getQuestionKeywords = (question: QuestionState): string[] => {
+    const keywordMap: Record<string, string[]> = {
+      'foundational': ['accounting', 'equation', 'assets', 'liabilities', 'equity', 'debit', 'credit', 'double-entry'],
+      'transaction': ['transaction', 'receivable', 'payable', 'voucher', 'invoice', 'sale', 'purchase'],
+      'reporting': ['balance', 'sheet', 'income', 'statement', 'cash', 'flow', 'financial', 'position'],
+      'practical': ['depreciation', 'ratio', 'analysis', 'current', 'fixed', 'working', 'capital']
+    };
+    
+    return keywordMap[question.competencyArea] || [];
+  };
+
+  // NEW: Response analysis engine
+  const analyzeResponse = useCallback((
+    userResponse: string, 
+    currentQuestion?: QuestionState
+  ): ResponseAnalysis => {
+    if (!currentQuestion) {
+      return {
+        type: 'unclear',
+        confidence: 0.3,
+        reasoning: 'No current question to validate against'
+      };
+    }
+
+    // Check for accounting keywords relevant to the question
+    const accountingTerms = extractAccountingTerms(userResponse);
+    const questionKeywords = getQuestionKeywords(currentQuestion);
+    const hasRelevantTerms = accountingTerms.some(term => 
+      questionKeywords.some(keyword => 
+        keyword.toLowerCase().includes(term.toLowerCase()) || 
+        term.toLowerCase().includes(keyword.toLowerCase())
+      )
+    );
+
+    // Check for question engagement patterns
+    const engagementPatterns = [
+      /I think|I believe|In my opinion/i,
+      /The answer is|It means|It refers to/i,
+      /I would|I'd approach it by/i,
+      /I'm not sure but|I don't know but|I think maybe/i,
+      /let me think|from what I understand|as far as I know/i
+    ];
+    
+    const showsEngagement = engagementPatterns.some(pattern => 
+      pattern.test(userResponse)
+    );
+
+    // Check for pure conversation patterns
+    const conversationPatterns = [
+      /how are you|how's your day|nice weather/i,
+      /thank you|thanks|that's interesting/i,
+      /^(yes|no|ok|okay|sure)$/i,
+      /good morning|good afternoon|hello|hi there/i,
+      /how long have you been|do you like your job/i
+    ];
+    
+    const isPureConversation = conversationPatterns.some(pattern => 
+      pattern.test(userResponse.trim())
+    ) && userResponse.trim().length < 50;
+
+    // Determine response type
+    if (hasRelevantTerms || showsEngagement) {
+      return {
+        type: 'question_addressed',
+        confidence: hasRelevantTerms ? 0.9 : 0.6,
+        accountingTerms,
+        reasoning: hasRelevantTerms 
+          ? 'Response contains relevant accounting terminology'
+          : 'Response shows question engagement patterns'
+      };
+    }
+    
+    if (isPureConversation) {
+      return {
+        type: 'question_dodged',
+        confidence: 0.8,  
+        reasoning: 'Response is purely conversational without accounting content'
+      };
+    }
+    
+    return {
+      type: 'unclear',
+      confidence: 0.4,
+      reasoning: 'Response analysis inconclusive - needs follow-up'
+    };
+  }, []);
+
+  // NEW: Update question state based on analysis
+  const updateQuestionState = useCallback((
+    analysis: ResponseAnalysis,
+    userResponse: string
+  ): QuestionValidationState => {
+    const newState = { ...questionValidationState };
+    
+    if (!newState.currentQuestion) return newState;
+
+    const updatedQuestion: QuestionState = { ...newState.currentQuestion };
+    
+    if (analysis.type === 'question_addressed') {
+      updatedQuestion.status = 'addressed';
+      // Move to completed questions
+      newState.completedQuestions = [...newState.completedQuestions, updatedQuestion];
+      // Update competency coverage
+      const competencyQuestions = newState.completedQuestions.filter(q => q.competencyArea === updatedQuestion.competencyArea);
+      const coveragePercentage = Math.min(100, (competencyQuestions.length / 2) * 100); // Assuming 2 questions per competency for 100%
+      
+      newState.competencyCoverage = {
+        ...newState.competencyCoverage,
+        [updatedQuestion.competencyArea]: coveragePercentage
+      };
+      newState.currentQuestion = undefined;
+      
+    } else if (analysis.type === 'question_dodged') {
+      updatedQuestion.attempts += 1;
+      updatedQuestion.status = 'dodged';
+      
+      if (updatedQuestion.attempts >= updatedQuestion.maxAttempts) {
+        // Max attempts reached, move to dodged questions and clear current
+        newState.dodgedQuestions = [...newState.dodgedQuestions, updatedQuestion];
+        newState.currentQuestion = undefined;
+      } else {
+        // Keep trying with updated attempt count
+        newState.currentQuestion = updatedQuestion;
+      }
+    }
+    
+    // For unclear responses, just keep the current question unchanged
+    setQuestionValidationState(newState);
+    return newState;
+  }, [questionValidationState]);
 
   // Add message to conversation
   const addMessage = useCallback((
@@ -150,12 +352,25 @@ export const useConversationOrchestrator = (
     abortControllerRef.current = new AbortController();
 
     try {
+      // NEW: Analyze user response for question validation
+      let responseAnalysis: ResponseAnalysis | null = null;
+      if (questionValidationState.currentQuestion && !options?.skipStateTransition) {
+        responseAnalysis = analyzeResponse(content, questionValidationState.currentQuestion);
+        console.log('[ConversationOrchestrator] Response analysis:', responseAnalysis);
+      }
+
       // Prepare request in Aestim's format
       const historyForAPI = convertToHistoryFormat(messagesRef.current);
       const requestBody = {
         history: historyForAPI,
         newUserMessage: content,
-        mode: config.mode || 'prod'
+        mode: config.mode || 'prod',
+        // NEW: Include question context for backend
+        questionContext: {
+          currentQuestion: questionValidationState.currentQuestion,
+          responseAnalysis,
+          competencyCoverage: questionValidationState.competencyCoverage
+        }
       };
 
       console.log('[ConversationOrchestrator] Sending request to backend:', config.backendUrl);
@@ -199,10 +414,19 @@ export const useConversationOrchestrator = (
       // AESTIM INTEGRATION: Parse response and handle interactive tasks
       const parsedResponse = parseAIResponse(rawAiMessage);
       
+      // NEW: Update question state based on response analysis
+      if (responseAnalysis && questionValidationState.currentQuestion) {
+        updateQuestionState(responseAnalysis, content);
+      }
+
       // Add AI message to conversation
       const aiMessage = addMessage('ai', parsedResponse.textForHistory, {
         isInteractive: parsedResponse.responseType === 'interactive',
-        taskType: parsedResponse.problemData?.taskType
+        taskType: parsedResponse.problemData?.taskType,
+        // NEW: Include question tracking in AI message metadata
+        questionId: questionValidationState.currentQuestion?.id,
+        questionStatus: responseAnalysis?.type === 'question_addressed' ? 'addressed' : 
+                      responseAnalysis?.type === 'question_dodged' ? 'dodged' : 'pending'
       });
 
       // Handle interactive tasks
@@ -391,6 +615,11 @@ export const useConversationOrchestrator = (
     currentInteractiveTask,
     isWaitingForResponse,
     isInteractive: currentInteractiveTask !== null,
+    
+    // NEW: Question validation state
+    questionValidationState,
+    currentQuestion: questionValidationState.currentQuestion,
+    competencyCoverage: questionValidationState.competencyCoverage,
 
     // Actions
     sendMessage,
@@ -401,6 +630,10 @@ export const useConversationOrchestrator = (
     completeSpeaking,
     resetConversation,
     cleanup,
+    
+    // NEW: Question validation actions
+    analyzeResponse,
+    updateQuestionState,
 
     // Utilities
     convertToHistoryFormat,
