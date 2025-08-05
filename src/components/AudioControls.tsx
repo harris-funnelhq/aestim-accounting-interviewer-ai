@@ -10,7 +10,7 @@ import { ConnectionStatus } from './ConnectionStatus';
 import { motion } from 'framer-motion';
 import { cn } from "@/lib/utils";
 import { Button } from './ui/button';
-import { Settings, Brain, Ear, MessageSquare, CheckCircle, FileText, EyeOff, RefreshCw } from 'lucide-react';
+import { Settings, Brain, Ear, MessageSquare, CheckCircle, FileText, EyeOff, RefreshCw, Gauge, Camera, CameraOff } from 'lucide-react';
 import { ConversationState } from '@/hooks/useConversationOrchestrator';
 
 interface AudioControlsProps {
@@ -27,6 +27,10 @@ interface AudioControlsProps {
   showTranscripts?: boolean; // Transcript visibility toggle
   onTranscriptToggle?: () => void; // Transcript toggle handler
   onReconnect?: () => void; // STT reconnection handler
+  speechRate?: "slow" | "normal" | "fast"; // Current speech rate
+  onSpeechRateChange?: (rate: "slow" | "normal" | "fast") => void; // Speech rate change handler
+  showCameraFeed?: boolean; // Camera feed visibility
+  onCameraToggle?: (show: boolean) => void; // Camera feed toggle handler
 }
 
 // Mic button remains the same - it's clean and effective.
@@ -123,7 +127,7 @@ const Waveform = ({ level }: { level: number }) => {
   // Using 9 bars for a more detailed crest effect
   const multipliers = [0.4, 0.6, 0.8, 0.9, 1, 0.9, 0.8, 0.6, 0.4];
   const maxBarHeight = 36; // Increased height for more pronounced crests
-  const minBarHeight = 2;
+  const minBarHeight = 8;
   const isSpeaking = level > 0.02;
 
   return (
@@ -163,6 +167,10 @@ export const AudioControls = ({
   showTranscripts = false, // Default to hiding transcripts
   onTranscriptToggle, // Transcript toggle handler
   onReconnect, // STT reconnection handler
+  speechRate = "normal", // Default speech rate
+  onSpeechRateChange, // Speech rate change handler
+  showCameraFeed = true, // Default camera feed visibility
+  onCameraToggle, // Camera feed toggle handler
 }: AudioControlsProps) => {
   const waveformLevel = isMicOn && connectionStatus === 'connected' ? audioLevel : 0;
 
@@ -222,6 +230,37 @@ export const AudioControls = ({
               title={showTranscripts ? "Hide live transcripts" : "Show live transcripts"}
             >
               {showTranscripts ? <FileText className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+            </Button>
+          )}
+          {/* Speech Rate Control */}
+          {onSpeechRateChange && (
+            <div className="flex items-center gap-2">
+              <Gauge className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+              <Select 
+                value={speechRate} 
+                onValueChange={(value: "slow" | "normal" | "fast") => onSpeechRateChange?.(value)}
+              >
+                <SelectTrigger className="w-20 h-12 border-slate-200 dark:border-slate-700 bg-transparent text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="slow">Slow</SelectItem>
+                  <SelectItem value="normal">Normal</SelectItem>
+                  <SelectItem value="fast">Fast</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {/* Camera Feed Toggle */}
+          {onCameraToggle && (
+            <Button 
+              variant={showCameraFeed ? "default" : "outline"} 
+              size="default" 
+              className="h-12" 
+              onClick={() => onCameraToggle(!showCameraFeed)}
+              title={showCameraFeed ? "Hide camera feed" : "Show camera feed"}
+            >
+              {showCameraFeed ? <Camera className="w-5 h-5" /> : <CameraOff className="w-5 h-5" />}
             </Button>
           )}
         </div>

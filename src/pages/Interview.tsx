@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -9,6 +9,7 @@ import CartesiaSpeaker, { CartesiaSpeakerHandle } from '@/components/CartesiaSpe
 import { AiInterviewer } from '@/components/AiInterviewer';
 import { InteractiveQuestionPanel } from '@/components/InteractiveQuestionPanel';
 import { CalibrationScreen } from '@/components/CalibrationScreen'; // Ensure this is imported
+import { CameraFeed } from '@/components/CameraFeed';
 import { useNavigate } from 'react-router-dom';
 import { useConversationOrchestrator, ConversationState } from '@/hooks/useConversationOrchestrator';
 
@@ -32,7 +33,7 @@ export interface HistoryItem {
 
 const DUMMY_WELCOME_MESSAGE: HistoryItem = {
   role: 'model',
-  parts: [{ text: "Welcome to the Aestim AI Accounting Assessment. I will be your interviewer today. When you're ready, we can begin." }]
+  parts: [{ text: "Hey there! Fun fact - 'budget' comes from French 'bougette' meaning 'little bag.' Medieval finance ministers literally used leather pouches! Pretty cool, right? I'm Alexa, and I'll be chatting with you about accounting today. How's your day going?" }]
 };
 
 export const Interview = () => {
@@ -97,6 +98,12 @@ export const Interview = () => {
   
   // Transcript visibility state - OFF by default
   const [showTranscripts, setShowTranscripts] = useState(false);
+  
+  // Speech rate control (Cartesia enum values)
+  const [speechRate, setSpeechRate] = useState<"slow" | "normal" | "fast">("slow"); // Slower for better comprehension
+  
+  // Camera feed control
+  const [showCameraFeed, setShowCameraFeed] = useState(true);
 
   const streamerRef = useRef<LiveAudioStreamer | null>(null);
   const speakerRef = useRef<CartesiaSpeakerHandle>(null);
@@ -388,6 +395,12 @@ export const Interview = () => {
     setShowTranscripts(prev => !prev);
   };
 
+  // Handle idle nudging - could trigger gentle audio cue or visual feedback
+  const handleIdleNudge = useCallback(() => {
+    console.log('[Interview] User has been idle for 30 seconds - gentle nudge triggered');
+    // Could add subtle audio cue or other gentle prompts here
+  }, []);
+
   const handleEndInterview = () => {
     streamerRef.current?.stopStreaming();
     cleanupOrchestrator(); // MOCKTAGON: Use conversation orchestrator cleanup
@@ -436,6 +449,7 @@ export const Interview = () => {
               <ConversationPanel
                 history={conversationOrchestrator.convertToHistoryFormat(messages)}
                 isWaitingForResponse={isWaitingForResponse}
+                onIdleNudge={handleIdleNudge}
               />
             </motion.div>
           )}
@@ -458,6 +472,14 @@ export const Interview = () => {
         onComplete={handleCalibrationComplete}
       />
 
+      {/* Camera Feed Tile */}
+      <CameraFeed
+        isVisible={showCameraFeed}
+        onToggleVisibility={setShowCameraFeed}
+        position="top-right"
+        size="medium"
+      />
+
       <AudioControls
         isMicOn={isMicOn}
         onMicToggle={handleMicToggle}
@@ -472,12 +494,17 @@ export const Interview = () => {
         showTranscripts={showTranscripts} // Pass transcript visibility state (default: false)
         onTranscriptToggle={handleTranscriptToggle} // Pass transcript toggle handler
         onReconnect={handleReconnect} // Pass STT reconnection handler
+        speechRate={speechRate} // Pass current speech rate
+        onSpeechRateChange={setSpeechRate} // Pass speech rate change handler
+        showCameraFeed={showCameraFeed} // Pass camera feed visibility
+        onCameraToggle={setShowCameraFeed} // Pass camera feed toggle handler
       />
       <CartesiaSpeaker
         ref={speakerRef}
         text={textToSpeak}
         trigger={conversationState === ConversationState.SPEAKING}
         mode="full"
+        speechRate={speechRate}
         onSpeakingStateChange={setIsSpeaking}
         onComplete={() => {
           console.log('[Interview] Speaking completed, transitioning to listening');

@@ -10,12 +10,13 @@ interface CartesiaSpeakerProps {
   text: string;
   trigger?: boolean; // MOCKTAGON: Trigger-based activation
   mode?: "first" | "full"; // MOCKTAGON: Speaking modes  
+  speechRate?: "slow" | "normal" | "fast"; // Speech speed: Cartesia enum values
   onSpeakingStateChange?: (isSpeaking: boolean) => void;
   onComplete?: () => void; // MOCKTAGON: Completion callback
 }
 
 const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
-  ({ text, trigger = false, mode = "full", onSpeakingStateChange, onComplete }, ref) => {
+  ({ text, trigger = false, mode = "full", speechRate = "normal", onSpeakingStateChange, onComplete }, ref) => {
     const [isSpeaking, setIsSpeaking] = useState(false);
     const audioCtxRef = useRef<AudioContext | null>(null);
     const playbackTimeRef = useRef<number>(0);
@@ -23,7 +24,15 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
     const lastSpokenTextRef = useRef<string | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
 
-    const graceVoiceId = "a38e4e85-e815-43ab-acf1-907c4688dd6c";
+    // Grace
+    // const graceVoiceId = "a38e4e85-e815-43ab-acf1-907c4688dd6c";
+
+    // Priya
+    const graceVoiceId = "f6141af3-5f94-418c-80ed-a45d450e7e2e";
+
+    // Janvi
+    // const graceVoiceId = "7ea5e9c2-b719-4dc3-b870-5ba5f14d31d8";
+    
     const pauseDurationMs = 500;
 
     const stopPlayback = () => {
@@ -140,12 +149,14 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
             context_id: contextId,
             transcript: firstSentence,
             continue: false,
+            speed: speechRate, // Control speech speed (Cartesia enum)
             output_format: {
               container: 'raw',
               encoding: 'pcm_f32le',
               sample_rate: 44100,
             },
           };
+          console.log('[CartesiaSpeaker] Sending message with speed:', speechRate, message);
           ws.send(JSON.stringify(message));
         } else {
           // Full mode: speak all sentences
@@ -157,12 +168,14 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
               context_id: contextId,
               transcript: sentence,
               continue: index !== sentences.length - 1,
+              speed: speechRate, // Control speech speed (Cartesia enum)
               output_format: {
                 container: 'raw',
                 encoding: 'pcm_f32le',
                 sample_rate: 44100,
               },
             };
+            if (index === 0) console.log('[CartesiaSpeaker] Sending message with speed:', speechRate, message);
             ws.send(JSON.stringify(message));
           });
         }
@@ -206,7 +219,7 @@ const CartesiaSpeaker = forwardRef<CartesiaSpeakerHandle, CartesiaSpeakerProps>(
         lastSpokenTextRef.current = text;
         speakSentences(text);
       }
-    }, [text, trigger, mode]);
+    }, [text, trigger, mode, speechRate]);
 
     return <div className="hidden" />;
   }
