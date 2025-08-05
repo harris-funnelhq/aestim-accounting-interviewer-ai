@@ -386,7 +386,8 @@ const LoadingState = () => {
 };
 
 const ErrorState = ({ message, onGoBack }: { message: string, onGoBack: () => void }) => {
-  const isInsufficientData = message.toLowerCase().includes('no interview history') || 
+  const isInsufficientData = message.toLowerCase().includes('insufficient conversation') || 
+                             message.toLowerCase().includes('no interview history') || 
                              message.toLowerCase().includes('insufficient data') ||
                              message.toLowerCase().includes('incomplete evaluation');
 
@@ -409,10 +410,10 @@ const ErrorState = ({ message, onGoBack }: { message: string, onGoBack: () => vo
               📋 What We Need for Assessment:
             </h3>
             <ul className="text-sm text-orange-700 dark:text-orange-300 space-y-1 text-left">
-              <li>• At least 5-10 meaningful exchanges</li>
-              <li>• Responses to technical questions</li>
-              <li>• Discussion of accounting concepts</li>
-              <li>• Demonstration of problem-solving approach</li>
+              <li>• At least 2-3 meaningful exchanges</li>
+              <li>• Responses to interviewer questions</li>
+              <li>• Discussion of relevant topics</li>
+              <li>• Demonstration of your knowledge</li>
             </ul>
           </div>
           <p className="text-muted-foreground">
@@ -573,8 +574,8 @@ export const ResultsPage = ({
     setError(null);
     const history = location.state?.history;
 
-    if (!history || history.length <= 1) {
-      setError("No interview history found. Please complete an interview first.");
+    if (!history || history.length < 4) { // At least 2 exchanges (4 messages: user, ai, user, ai)
+      setError("Insufficient conversation data. Please have at least 2-3 meaningful exchanges with the interviewer.");
       setIsLoading(false);
       return;
     }
