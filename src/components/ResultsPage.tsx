@@ -43,35 +43,30 @@ const SkillsRadarChart = ({ competencies }: { competencies: Competency[] }) => {
   const radius = 160; // Increased radius
   const innerRadius = 40;
   
-  // Ensure we have exactly 9 skills for the nonagon, pad with empty if needed
-  const skills = [...competencies];
-  while (skills.length < 9) {
-    skills.push({ skill: '', score: 0 });
-  }
+  // Use actual number of competencies (no padding or slicing)
+  const displaySkills = competencies.filter(comp => comp.skill || comp.name); // Only include skills with names
+  const numSides = Math.max(displaySkills.length, 3); // Minimum 3 sides for a valid polygon
   
-  // Take only first 9 skills
-  const displaySkills = skills.slice(0, 9);
-  
-  // Calculate points for nonagon (9 sides)
+  // Calculate points for dynamic polygon based on actual number of skills
   const getPointOnCircle = (index: number, radius: number) => {
-    const angle = (index * 2 * Math.PI) / 9 - Math.PI / 2; // Start from top
+    const angle = (index * 2 * Math.PI) / numSides - Math.PI / 2; // Start from top
     const x = center + radius * Math.cos(angle);
     const y = center + radius * Math.sin(angle);
     return { x, y, angle };
   };
   
-  // Generate grid levels (concentric nonagons)
+  // Generate grid levels (concentric polygons with dynamic sides)
   const gridLevels = [20, 40, 60, 80, 100];
   const gridPaths = gridLevels.map(level => {
-    const points = Array.from({ length: 9 }, (_, i) => {
+    const points = Array.from({ length: numSides }, (_, i) => {
       const point = getPointOnCircle(i, (radius * level) / 100);
       return `${point.x},${point.y}`;
     });
     return `M${points.join('L')}Z`;
   });
   
-  // Generate axis lines
-  const axisLines = Array.from({ length: 9 }, (_, i) => {
+  // Generate axis lines (dynamic number based on actual skills)
+  const axisLines = Array.from({ length: numSides }, (_, i) => {
     const outerPoint = getPointOnCircle(i, radius);
     return {
       x1: center,
@@ -271,7 +266,7 @@ const SkillsRadarChart = ({ competencies }: { competencies: Competency[] }) => {
       <div className="text-center">
         <h3 className="text-lg font-semibold text-foreground mb-2">Skills Assessment Overview</h3>
         <p className="text-sm text-muted-foreground">
-          Each vertex represents a core competency with scores from 0-100
+          {numSides}-sided polygon showing {displaySkills.length} competencies (scores 0-100)
         </p>
       </div>
     </div>

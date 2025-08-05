@@ -160,7 +160,7 @@ export const AudioControls = ({
   conversationState, // MOCKTAGON: New conversation state prop
   onEndInterview,
   onCalibrate, // Manual calibration trigger
-  showTranscripts = true, // Default to showing transcripts
+  showTranscripts = false, // Default to hiding transcripts
   onTranscriptToggle, // Transcript toggle handler
   onReconnect, // STT reconnection handler
 }: AudioControlsProps) => {
