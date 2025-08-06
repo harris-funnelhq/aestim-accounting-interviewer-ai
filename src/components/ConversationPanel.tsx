@@ -12,11 +12,11 @@ interface ConversationPanelProps {
 
 // Enhanced typing indicator component
 const TypingIndicator = () => {
-  const [typingText, setTypingText] = useState("Alexa is thinking");
+  const [typingText, setTypingText] = useState("Smriti is thinking");
   
   useEffect(() => {
     const phrases = [
-      "Alexa is thinking",
+      "Smriti is thinking",
       "Processing your response",
       "Analyzing your answer",
       "Preparing follow-up"
